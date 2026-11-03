@@ -38,6 +38,7 @@ DEFAULT_OUTPUT_DIR = os.path.join(REPO_ROOT, "development", "recordings")
 SPOKE_URL = "http://localhost:8080"
 HUB_URL = "http://localhost:8081"
 RULES_PATH = "/plugins/ssot-mongo/ownership-rules/"
+INSTANCES_PATH = "/plugins/ssot-mongo/federated-instances/"
 SOURCE_JOB = "nautobot_ssot_mongo.jobs.MongoDataSource"
 TARGET_JOB = "nautobot_ssot_mongo.jobs.MongoDataTarget"
 TRANSFER_JOB = "nautobot_ssot_mongo.jobs.TransferOwnership"
@@ -310,6 +311,22 @@ def hub_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
         "Every run with its diff summary; click one for the per-object log.",
         1.0,
     )
+
+    walk.show(
+        INSTANCES_PATH,
+        "Federated Instances",
+        "The registry: every instance that completed a sync job, with role, last publish, last pull, versions "
+        "and published document counts. The rows come from the heartbeat each job writes to MongoDB.",
+        1.8,
+    )
+    spoke_row = walk.first(INSTANCES_PATH, role="SPOKE")
+    if spoke_row:
+        walk.show(
+            f"{INSTANCES_PATH}{spoke_row['id']}/",
+            "A spoke in the registry",
+            "The per-type breakdown of what this spoke has published, and the apps it runs.",
+            1.6,
+        )
 
     device = walk.first("/dcim/devices/")
     if device:

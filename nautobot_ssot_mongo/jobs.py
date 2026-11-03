@@ -18,18 +18,18 @@ the same sequence for one owner's objects:
 Which types make up the catalog and the inventory is data: one `OwnershipRule` per type, defined on the hub. The
 hub's "Nautobot to MongoDB" run publishes the rules next to the catalog, and a spoke refreshes its copy of them
 before either of its jobs loads anything. The Transfer Ownership job, on the hub, moves a type to the other role.
+
+Every successful run ends by writing the instance's heartbeat document to MongoDB, and every run starts and ends by
+refreshing the `FederatedInstance` registry from the heartbeats of all instances.
 """
 
 import logging
 from contextlib import nullcontext
 
-from django.core.cache import cache
-from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
 from nautobot.apps.jobs import BooleanVar, DryRunVar, Job, MultiChoiceVar, ObjectVar, register_jobs
 from nautobot.apps.utils import get_route_for_model
 from nautobot_ssot.jobs.base import DataMapping, DataSource, DataTarget
-from pymongo.errors import PyMongoError
 
 from nautobot_ssot_mongo.changelog import changelog_disabled
 from nautobot_ssot_mongo.constants import JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
@@ -40,9 +40,10 @@ from nautobot_ssot_mongo.diffsync.adapters import (
     MongoNautobotAdapter,
     owned_model_names,
 )
-from nautobot_ssot_mongo.models import OwnershipRule, model_display_name, ownership_rules_writable
+from nautobot_ssot_mongo.models import FederatedInstance, OwnershipRule, model_display_name, ownership_rules_writable
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
 from nautobot_ssot_mongo.ownership import apply_owner_change, apply_rules, publish_rules, pull_rules
+from nautobot_ssot_mongo.registry import PUBLISH, PULL, refresh_registry, write_heartbeat
 from nautobot_ssot_mongo.roles import ROLE_HUB, ROLE_SPOKE, get_hub_instance, get_role, other_role
 from nautobot_ssot_mongo.utils.mongo import (
     MongoSyncClient,
@@ -56,9 +57,6 @@ logger = logging.getLogger(__name__)
 
 name = "MongoDB SSoT"  # pylint: disable=invalid-name
 
-REMOTE_INSTANCES_CACHE_KEY = "nautobot_ssot_mongo.remote_instances"
-REMOTE_INSTANCES_CACHE_TIMEOUT = 60
-
 
 def model_label(model_name):
     """Return the display name of a DiffSync model's Nautobot model, for example `IP Address`."""
@@ -66,33 +64,24 @@ def model_label(model_name):
 
 
 def get_remote_instance_choices():
-    """`MultiChoiceVar` choices: the partitions published by the other role, or `[]` when MongoDB is unreachable.
+    """`MultiChoiceVar` choices: the registered instances of the other role, from the federated instance registry.
 
-    Evaluated when the job form renders. The distinct-instance query walks the collection's index, so the result
-    is cached for `REMOTE_INSTANCES_CACHE_TIMEOUT` seconds; a newly published partition still shows up without a
-    restart. An unreachable MongoDB yields an empty list that is not cached, so the form still renders.
+    Evaluated when the job form renders, from the local database only. Every sync job refreshes the registry, so a
+    new spoke is offered here once it has published and this instance has run any job since; a pull with nothing
+    selected reads every spoke partition in the collection regardless.
     """
-    cached = cache.get(REMOTE_INSTANCES_CACHE_KEY)
-    if cached is not None:
-        return cached
-    try:
-        app_settings = get_app_settings()
-        client = MongoSyncClient.from_settings(app_settings)
-        instances = client.instances(
-            exclude_role=get_role(app_settings), exclude_instance=get_nautobot_instance(app_settings)
-        )
-    except (PyMongoError, ImproperlyConfigured):
-        logger.warning("Could not list the remote Nautobot instances from MongoDB", exc_info=True)
-        return []
-    choices = [(instance, instance) for instance in instances]
-    cache.set(REMOTE_INSTANCES_CACHE_KEY, choices, REMOTE_INSTANCES_CACHE_TIMEOUT)
-    return choices
+    names = FederatedInstance.objects.filter(role=other_role(get_role())).values_list("name", flat=True)
+    return [(name, name) for name in names]
 
 
 class MongoSyncMixin:
     """Behaviour shared by both sync directions."""
 
     debug = BooleanVar(description="Enable for more verbose debug logging", default=False)
+
+    # `PUBLISH` or `PULL`: the heartbeat timestamp a finished run of this job sets.
+    heartbeat_field = None
+    _mongo_client = None
 
     @classmethod
     def owner_role(cls):
@@ -139,10 +128,12 @@ class MongoSyncMixin:
         return list(selected) if isinstance(selected, (list, tuple)) else []
 
     def get_mongo_client(self):
-        """Connect to MongoDB using the app settings and make sure the indexes exist."""
-        client = MongoSyncClient.from_settings()
-        client.ensure_indexes(tombstone_ttl_seconds=get_tombstone_ttl_seconds())
-        return client
+        """Return the job's MongoDB client, connecting and making sure the indexes exist on first use."""
+        if self._mongo_client is None:
+            client = MongoSyncClient.from_settings()
+            client.ensure_indexes(tombstone_ttl_seconds=get_tombstone_ttl_seconds())
+            self._mongo_client = client
+        return self._mongo_client
 
     def get_mongo_adapter(self, client, read_instances=None):
         """Build the MongoDB side of the owner's SSoT adapter."""
@@ -163,7 +154,26 @@ class MongoSyncMixin:
         self.record_changelog = bool(kwargs.pop("record_changelog", True))
         if get_role() == ROLE_SPOKE:
             self.refresh_ownership_rules()
+        self.refresh_registry()
         super().run(dryrun=self.dryrun, memory_profiling=self.memory_profiling, *args, **kwargs)
+
+    def refresh_registry(self):
+        """Mirror the heartbeat documents in MongoDB into the federated instance registry, dry run included."""
+        refresh_registry(self.get_mongo_client(), log=self.logger)
+
+    def record_heartbeat(self):
+        """Write this instance's heartbeat after a successful sync, then refresh the registry from every heartbeat."""
+        app_settings = get_app_settings()
+        client = self.get_mongo_client()
+        write_heartbeat(
+            client,
+            get_nautobot_instance(app_settings),
+            get_role(app_settings),
+            self.heartbeat_field,
+            metadata=get_status_metadata(),
+            log=self.logger,
+        )
+        refresh_registry(client, log=self.logger)
 
     def refresh_ownership_rules(self):
         """Make this spoke's ownership rules match the ones the hub published, before any adapter reads them.
@@ -215,11 +225,13 @@ class MongoSyncMixin:
         with changelog:
             self.source_adapter.sync_to(self.target_adapter, flags=self.diffsync_flags, diff_class=CustomOrderingDiff)
         self.logger.info("Finalization of operation: %s-owned objects synced into %s.", owner, self.Meta.data_target)
+        self.record_heartbeat()
 
 
 class MongoDataSource(MongoSyncMixin, DataSource):
     """Sync the objects owned by the other role from MongoDB into this Nautobot instance."""
 
+    heartbeat_field = PULL
     nautobot_instances = MultiChoiceVar(
         choices=get_remote_instance_choices,
         required=False,
@@ -295,6 +307,8 @@ class MongoDataSource(MongoSyncMixin, DataSource):
 
 class MongoDataTarget(MongoSyncMixin, DataTarget):
     """Load the objects this instance owns into MongoDB."""
+
+    heartbeat_field = PUBLISH
 
     class Meta:  # pylint: disable=too-few-public-methods
         """Meta data for MongoDataTarget."""

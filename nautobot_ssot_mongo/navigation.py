@@ -11,6 +11,11 @@ menu_items = (
                 weight=100,
                 items=(
                     NavMenuItem(
+                        link="plugins:nautobot_ssot_mongo:federatedinstance_list",
+                        name="Federated Instances",
+                        permissions=["nautobot_ssot_mongo.view_federatedinstance"],
+                    ),
+                    NavMenuItem(
                         link="plugins:nautobot_ssot_mongo:ownershiprule_list",
                         name="Ownership Rules",
                         permissions=["nautobot_ssot_mongo.view_ownershiprule"],

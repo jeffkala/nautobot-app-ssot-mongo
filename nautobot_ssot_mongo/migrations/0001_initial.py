@@ -1,4 +1,4 @@
-"""Create the app's schema and seed data: the owner metadata type and the default ownership rules."""
+"""Create the app's schema and seed data: the ownership rules, the instance registry and the owner metadata type."""
 
 import uuid
 
@@ -89,7 +89,7 @@ def delete_ownership_rules(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    """Initial schema and seed data."""
+    """Initial schema and seed data: `OwnershipRule`, `FederatedInstance`, the owner metadata type and the default rules."""
 
     initial = True
 
@@ -130,6 +130,41 @@ class Migration(migrations.Migration):
             options={
                 "verbose_name": "ownership rule",
                 "ordering": ["sync_order", "content_type__app_label", "content_type__model"],
+            },
+            bases=(
+                nautobot.extras.models.mixins.DataComplianceModelMixin,
+                nautobot.extras.models.mixins.DynamicGroupMixin,
+                nautobot.extras.models.mixins.NotesMixin,
+                models.Model,
+            ),
+        ),
+        migrations.CreateModel(
+            name="FederatedInstance",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False, unique=True
+                    ),
+                ),
+                ("created", models.DateTimeField(auto_now_add=True, null=True)),
+                ("last_updated", models.DateTimeField(auto_now=True, null=True)),
+                (
+                    "_custom_field_data",
+                    models.JSONField(blank=True, default=dict, encoder=django.core.serializers.json.DjangoJSONEncoder),
+                ),
+                ("name", models.CharField(max_length=255, unique=True)),
+                ("role", models.CharField(max_length=5)),
+                ("last_publish", models.DateTimeField(blank=True, null=True)),
+                ("last_pull", models.DateTimeField(blank=True, null=True)),
+                ("last_seen", models.DateTimeField(blank=True, null=True)),
+                ("nautobot_version", models.CharField(blank=True, max_length=255)),
+                ("app_versions", models.JSONField(blank=True, default=dict)),
+                ("document_counts", models.JSONField(blank=True, default=dict)),
+            ],
+            options={
+                "verbose_name": "federated instance",
+                "ordering": ["name"],
             },
             bases=(
                 nautobot.extras.models.mixins.DataComplianceModelMixin,

@@ -5,8 +5,8 @@ from nautobot.apps.choices import ChoiceSet
 from nautobot_ssot_mongo.roles import ROLE_HUB, ROLE_SPOKE
 
 
-class OwnerRoleChoices(ChoiceSet):
-    """The Nautobot role whose instances own a federated content type."""
+class RoleChoices(ChoiceSet):
+    """A Nautobot instance's role in the federation: the hub, or one of the spokes."""
 
     CHOICES = (
         (ROLE_HUB, "Hub"),

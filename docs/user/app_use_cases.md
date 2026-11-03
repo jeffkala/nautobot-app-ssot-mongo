@@ -53,6 +53,15 @@ spoke that owns it, visible under *Object Metadata* on its detail page.
     Only objects previously synced in from the selected spokes are reconciled. Locations or devices maintained directly
     on the hub are never removed by the pull.
 
+### Check on the federation
+
+**Apps > MongoDB SSoT > Federated Instances** lists every instance that has completed a sync job, with its role, the
+time of its last publish and last pull, its Nautobot and app versions and the number of documents it has published per
+object type. Open an instance for the per-type breakdown. The rows are refreshed by every sync job on this instance,
+so run any job (a dry run is enough) to pick up heartbeats written since the last run. A spoke whose *last publish*
+stops advancing, or whose document counts drop unexpectedly, is worth a look before the next consolidation on the
+hub.
+
 ### Leave a type out of the sync
 
 On the hub, open **Apps > MongoDB SSoT > Ownership Rules**, edit the rule of the type and uncheck *Enabled*. The
@@ -97,7 +106,15 @@ tombstone after `tombstone_ttl_days`; re-creating the object before then revives
 Install the app on the new instance with `nautobot_role` set to `SPOKE`, a unique `nautobot_instance` and the
 `hub_instance` of the hub. Run **MongoDB to Nautobot** to import the catalog (the job first mirrors the ownership
 rules the hub published), then **Nautobot to MongoDB** to publish the spoke's inventory. No change is needed on the
-hub: the new partition appears in the *Nautobot instances* field of its **MongoDB to Nautobot** job.
+hub: a pull with the *Nautobot instances* field left empty reads every spoke partition, and once any job has run on
+the hub the new spoke is listed in that field and under **Federated Instances**.
+
+### Retire a spoke
+
+Remove the spoke's documents from the collection, for example with `db.objects.deleteMany({nautobot_instance:
+"SPOKE-Austin"})` in `mongosh`. The next **MongoDB to Nautobot** run on the hub no longer finds the partition, so it
+deletes the objects it had synced in from that spoke, and the next sync job on every instance removes the spoke from
+**Federated Instances**. The spoke's own Nautobot keeps its data.
 
 ## Screenshots
 

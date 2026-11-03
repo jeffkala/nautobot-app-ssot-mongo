@@ -16,7 +16,8 @@ Both share the MongoDB of the default stack. The sequence mirrors the architectu
 3. The spoke owns a location tree, a rack, two devices with interfaces, a VLAN, an IP address and a cable (created
    through its REST API) and loads them into MongoDB with "Nautobot to MongoDB".
 4. The hub runs "MongoDB to Nautobot" for the spoke's partition: the SSoT spoke adapter syncs the spoke-owned models in,
-   stamps each with the spoke as owner, and the device and cable appear on the hub.
+   stamps each with the spoke as owner, and the device and cable appear on the hub. The registry on the hub now lists
+   both instances from the heartbeats their jobs wrote.
 5. The spoke deletes the cable and publishes again; the hub pulls once more. The cable disappears from the hub through
    the tombstone the spoke wrote, while a location the hub created itself is left untouched.
 
@@ -366,6 +367,21 @@ def verify_hub_has_the_device(hub: Instance):
         raise RuntimeError("the spoke's cable or VLAN did not arrive on the hub")
 
 
+def verify_registry(hub: Instance):
+    """Check that the hub's registry lists both instances from their heartbeats, and show it in the browser."""
+    rows = {row["name"]: row for row in hub.api("GET", "/plugins/ssot-mongo/federated-instances/")["results"]}
+    log(hub.name, f"Federated instances: {', '.join(f'{name} ({row['role']})' for name, row in rows.items())}")
+    hub.show("/plugins/ssot-mongo/federated-instances/")
+    spoke_row = rows.get(SPOKE_INSTANCE)
+    if spoke_row is None or spoke_row["role"] != "SPOKE" or not spoke_row["last_publish"]:
+        raise RuntimeError(f"the registry on the hub does not list {SPOKE_INSTANCE} with a last publish time")
+    if spoke_row["document_counts"].get("dcim.device", 0) < 2:
+        raise RuntimeError(f"the registry shows fewer than two devices published by {SPOKE_INSTANCE}")
+    hub_rows = [row for row in rows.values() if row["role"] == "HUB"]
+    if len(hub_rows) != 1 or not hub_rows[0]["last_pull"]:
+        raise RuntimeError("the registry on the hub does not list the hub itself with a last pull time")
+
+
 def ensure_hub_local_location(hub: Instance):
     """Create a location on the hub that no spoke owns; the scoped pull must leave it alone."""
     active = hub.get_one("/extras/statuses/", name="Active")
@@ -476,6 +492,7 @@ def main(argv=None):
             log("step 4", "hub syncs the spoke-owned inventory in from MongoDB")
             hub.run_job(SOURCE_JOB, nautobot_instances=[SPOKE_INSTANCE])
             verify_hub_has_the_device(hub)
+            verify_registry(hub)
 
             log("step 5", "spoke retires the cable; the tombstone removes it from the hub")
             retire_the_cable(spoke, hub)

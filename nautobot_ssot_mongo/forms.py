@@ -12,9 +12,9 @@ from nautobot.apps.forms import (
     add_blank_choice,
 )
 
-from nautobot_ssot_mongo.choices import OwnerRoleChoices
+from nautobot_ssot_mongo.choices import RoleChoices
 from nautobot_ssot_mongo.filters import supported_content_type_choices
-from nautobot_ssot_mongo.models import OwnershipRule, supported_content_types
+from nautobot_ssot_mongo.models import FederatedInstance, OwnershipRule, supported_content_types
 
 BOOLEAN_CHOICES = ((True, "Yes"), (False, "No"))
 
@@ -54,5 +54,13 @@ class OwnershipRuleFilterForm(NautobotFilterForm):  # pylint: disable=too-many-a
     content_type = forms.MultipleChoiceField(
         choices=supported_content_type_choices, required=False, widget=StaticSelect2Multiple()
     )
-    owner_role = forms.MultipleChoiceField(choices=OwnerRoleChoices, required=False, widget=StaticSelect2Multiple())
+    owner_role = forms.MultipleChoiceField(choices=RoleChoices, required=False, widget=StaticSelect2Multiple())
     enabled = forms.NullBooleanField(required=False, widget=StaticSelect2(choices=add_blank_choice(BOOLEAN_CHOICES)))
+
+
+class FederatedInstanceFilterForm(NautobotFilterForm):  # pylint: disable=too-many-ancestors
+    """Filter the federated instance list."""
+
+    model = FederatedInstance
+    q = forms.CharField(required=False, label="Search")
+    role = forms.MultipleChoiceField(choices=RoleChoices, required=False, widget=StaticSelect2Multiple())

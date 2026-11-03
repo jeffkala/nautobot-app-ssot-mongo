@@ -3,7 +3,7 @@
 from django.contrib.contenttypes.models import ContentType
 from nautobot.apps.api import ContentTypeField, NautobotModelSerializer
 
-from nautobot_ssot_mongo.models import OwnershipRule, supported_content_types
+from nautobot_ssot_mongo.models import FederatedInstance, OwnershipRule, supported_content_types
 
 
 class OwnershipRuleSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
@@ -15,4 +15,14 @@ class OwnershipRuleSerializer(NautobotModelSerializer):  # pylint: disable=too-m
         """Meta options for OwnershipRuleSerializer."""
 
         model = OwnershipRule
+        fields = "__all__"
+
+
+class FederatedInstanceSerializer(NautobotModelSerializer):  # pylint: disable=too-many-ancestors
+    """Serialize the members of the federation."""
+
+    class Meta:
+        """Meta options for FederatedInstanceSerializer."""
+
+        model = FederatedInstance
         fields = "__all__"

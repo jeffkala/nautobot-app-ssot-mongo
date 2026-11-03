@@ -3,9 +3,9 @@
 import django_filters
 from nautobot.apps.filters import ContentTypeMultipleChoiceFilter, NautobotFilterSet, SearchFilter
 
-from nautobot_ssot_mongo.choices import OwnerRoleChoices
+from nautobot_ssot_mongo.choices import RoleChoices
 from nautobot_ssot_mongo.constants import DEFAULT_OWNERSHIP_RULES
-from nautobot_ssot_mongo.models import OwnershipRule
+from nautobot_ssot_mongo.models import FederatedInstance, OwnershipRule
 
 
 def supported_content_type_choices():
@@ -23,10 +23,23 @@ class OwnershipRuleFilterSet(NautobotFilterSet):
         },
     )
     content_type = ContentTypeMultipleChoiceFilter(choices=supported_content_type_choices, conjoined=False)
-    owner_role = django_filters.MultipleChoiceFilter(choices=OwnerRoleChoices)
+    owner_role = django_filters.MultipleChoiceFilter(choices=RoleChoices)
 
     class Meta:
         """Meta options for OwnershipRuleFilterSet."""
 
         model = OwnershipRule
+        fields = "__all__"
+
+
+class FederatedInstanceFilterSet(NautobotFilterSet):
+    """Filter the federated instances by name, role and versions."""
+
+    q = SearchFilter(filter_predicates={"name": "icontains", "nautobot_version": "icontains"})
+    role = django_filters.MultipleChoiceFilter(choices=RoleChoices)
+
+    class Meta:
+        """Meta options for FederatedInstanceFilterSet."""
+
+        model = FederatedInstance
         fields = "__all__"

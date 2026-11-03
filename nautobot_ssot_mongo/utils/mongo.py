@@ -170,6 +170,22 @@ class MongoSyncClient:
             query["nautobot_instance"] = {"$ne": exclude_instance}
         return sorted(self.collection.distinct("nautobot_instance", query))
 
+    def count_by_content_type(
+        self, nautobot_instance: str, exclude_content_types: Iterable[str] = ()
+    ) -> Dict[str, int]:
+        """Return how many live documents one partition holds per content type, as `{content_type: count}`.
+
+        Args:
+            nautobot_instance (str): The partition to count.
+            exclude_content_types (Iterable[str]): Content types to leave out, such as the app's control documents.
+        """
+        match: Dict[str, Any] = {"nautobot_instance": nautobot_instance, **NOT_DELETED}
+        excluded = list(exclude_content_types)
+        if excluded:
+            match["content_type"] = {"$nin": excluded}
+        pipeline = [{"$match": match}, {"$group": {"_id": "$content_type", "count": {"$sum": 1}}}]
+        return {row["_id"]: row["count"] for row in self.collection.aggregate(pipeline)}
+
     def find(
         self, nautobot_instance: Union[str, Iterable[str]], content_type: str, include_deleted: bool = False
     ) -> Iterable[Dict[str, Any]]:
