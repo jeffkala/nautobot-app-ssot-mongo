@@ -9,11 +9,11 @@ from pymongo.errors import BulkWriteError
 from nautobot_ssot_mongo.constants import MONGO_BATCH_LIMIT
 from nautobot_ssot_mongo.diffsync.adapters import (
     TOP_LEVEL,
+    HubMongoAdapter,
+    HubNautobotAdapter,
     MongoRemoteAdapter,
-    NAPMongoAdapter,
-    NAPNautobotAdapter,
-    NDPMongoAdapter,
-    NDPNautobotAdapter,
+    SpokeMongoAdapter,
+    SpokeNautobotAdapter,
     owned_model_names,
     parents_first,
     sort_related_dicts,
@@ -89,19 +89,19 @@ class MongoRemoteAdapterTestCase(TestCase):
         self.assertEqual([m.name for m in self.adapter.get_all("manufacturer")], ["Cisco"])
 
     def test_load_reads_every_requested_instance_but_writes_only_its_own(self):
-        adapter = build_adapter(instance="NDP", read_instances=["NAP-Austin", "NAP-Boston"])
+        adapter = build_adapter(instance="HUB", read_instances=["SPOKE-Austin", "SPOKE-Boston"])
         client = adapter.client
-        client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco"})
-        client.upsert("NAP-Austin", "dcim.manufacturer", "Arista", {"name": "Arista"})
-        client.upsert("NAP-Boston", "dcim.manufacturer", "Juniper", {"name": "Juniper"})
+        client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco"})
+        client.upsert("SPOKE-Austin", "dcim.manufacturer", "Arista", {"name": "Arista"})
+        client.upsert("SPOKE-Boston", "dcim.manufacturer", "Juniper", {"name": "Juniper"})
 
         adapter.load()
         adapter.manufacturer.create(adapter, ids={"name": "Nokia"}, attrs={"description": ""})
         adapter.flush()
 
         self.assertEqual({m.name for m in adapter.get_all("manufacturer")}, {"Arista", "Juniper"})
-        self.assertIsNotNone(client.get("NDP", "dcim.manufacturer", "Nokia"))
-        self.assertIsNone(client.get("NAP-Austin", "dcim.manufacturer", "Nokia"))
+        self.assertIsNotNone(client.get("HUB", "dcim.manufacturer", "Nokia"))
+        self.assertIsNone(client.get("SPOKE-Austin", "dcim.manufacturer", "Nokia"))
 
     def test_load_skips_tombstones(self):
         self.client.upsert(INSTANCE, "dcim.manufacturer", "Cisco", {"name": "Cisco"})
@@ -113,17 +113,17 @@ class MongoRemoteAdapterTestCase(TestCase):
         self.assertEqual([m.name for m in self.adapter.get_all("manufacturer")], ["Cisco"])
 
     def test_load_records_the_origin_owner_of_every_object(self):
-        adapter = build_adapter(instance="NDP", read_instances=["NAP-Austin", "NAP-Boston"])
-        adapter.client.upsert("NAP-Austin", "dcim.manufacturer", "Arista", {"name": "Arista"})
+        adapter = build_adapter(instance="HUB", read_instances=["SPOKE-Austin", "SPOKE-Boston"])
+        adapter.client.upsert("SPOKE-Austin", "dcim.manufacturer", "Arista", {"name": "Arista"})
         adapter.client.upsert(
-            "NAP-Boston", "dcim.devicetype", "X__Juniper", {"model": "X", "manufacturer__name": "Juniper"}
+            "SPOKE-Boston", "dcim.devicetype", "X__Juniper", {"model": "X", "manufacturer__name": "Juniper"}
         )
 
         adapter.load()
 
-        self.assertEqual(adapter.origin_owners[("manufacturer", (("name", "Arista"),))], "NAP-Austin")
+        self.assertEqual(adapter.origin_owners[("manufacturer", (("name", "Arista"),))], "SPOKE-Austin")
         self.assertEqual(
-            adapter.origin_owners[("devicetype", (("manufacturer__name", "Juniper"), ("model", "X")))], "NAP-Boston"
+            adapter.origin_owners[("devicetype", (("manufacturer__name", "Juniper"), ("model", "X")))], "SPOKE-Boston"
         )
 
     def test_sync_to_exposes_the_source_on_the_target_only_during_the_sync(self):
@@ -164,15 +164,15 @@ class MongoRemoteAdapterTestCase(TestCase):
         )
 
     def test_owner_adapters_only_process_their_owners_models(self):
-        ndp_models = owned_model_names("NDP")
-        nap_models = owned_model_names("NAP")
+        hub_models = owned_model_names("HUB")
+        spoke_models = owned_model_names("SPOKE")
 
-        self.assertEqual(build_adapter(adapter_class=NDPMongoAdapter).top_level, ndp_models)
-        self.assertEqual(build_adapter(adapter_class=NAPMongoAdapter).top_level, nap_models)
-        self.assertEqual(NDPNautobotAdapter(job=MagicMock(), sync=None).top_level, ndp_models)
-        self.assertEqual(NAPNautobotAdapter(job=MagicMock(), sync=None).top_level, nap_models)
-        self.assertEqual(set(ndp_models) & set(nap_models), set())
-        self.assertEqual(ndp_models + nap_models, TOP_LEVEL)
+        self.assertEqual(build_adapter(adapter_class=HubMongoAdapter).top_level, hub_models)
+        self.assertEqual(build_adapter(adapter_class=SpokeMongoAdapter).top_level, spoke_models)
+        self.assertEqual(HubNautobotAdapter(job=MagicMock(), sync=None).top_level, hub_models)
+        self.assertEqual(SpokeNautobotAdapter(job=MagicMock(), sync=None).top_level, spoke_models)
+        self.assertEqual(set(hub_models) & set(spoke_models), set())
+        self.assertEqual(hub_models + spoke_models, TOP_LEVEL)
 
     def test_owner_adapters_follow_the_rules_as_they_change(self):
         with ownership_rules_writable():
@@ -180,13 +180,13 @@ class MongoRemoteAdapterTestCase(TestCase):
             rule.enabled = False
             rule.validated_save()
             rule = OwnershipRule.objects.get(content_type__model="prefix")
-            rule.owner_role = "NAP"
+            rule.owner_role = "SPOKE"
             rule.sync_order = 50
             rule.validated_save()
 
-        self.assertNotIn("cable", build_adapter(adapter_class=NAPMongoAdapter).top_level)
-        self.assertEqual(build_adapter(adapter_class=NAPMongoAdapter).top_level[-1], "prefix")
-        self.assertNotIn("prefix", build_adapter(adapter_class=NDPMongoAdapter).top_level)
+        self.assertNotIn("cable", build_adapter(adapter_class=SpokeMongoAdapter).top_level)
+        self.assertEqual(build_adapter(adapter_class=SpokeMongoAdapter).top_level[-1], "prefix")
+        self.assertNotIn("prefix", build_adapter(adapter_class=HubMongoAdapter).top_level)
 
 
 class ParentsFirstTestCase(TestCase):

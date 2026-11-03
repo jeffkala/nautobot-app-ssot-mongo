@@ -14,7 +14,7 @@ from nautobot_ssot_mongo.diffsync.models import catalog, inventory
 from nautobot_ssot_mongo.models import OwnershipRule
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
 
-migration = importlib.import_module("nautobot_ssot_mongo.migrations.0001_ssot_mongo_owner_metadatatype")
+migration = importlib.import_module("nautobot_ssot_mongo.migrations.0001_initial")
 
 
 def _local_models():
@@ -63,12 +63,12 @@ class ModelPairContractTestCase(TestCase):
             [adapters.MODEL_NAMES_BY_CONTENT_TYPE[f"{app}.{model}"] for app, model, _ in DEFAULT_OWNERSHIP_RULES],
         )
 
-    def test_ipaddress_is_owned_by_the_nap_by_default(self):
+    def test_ipaddress_is_owned_by_the_spoke_by_default(self):
         rule = OwnershipRule.objects.get(content_type__app_label="ipam", content_type__model="ipaddress")
 
-        self.assertEqual(rule.owner_role, "NAP")
-        self.assertIn("ipaddress", adapters.owned_model_names("NAP"))
-        self.assertNotIn("ipaddress", adapters.owned_model_names("NDP"))
+        self.assertEqual(rule.owner_role, "SPOKE")
+        self.assertIn("ipaddress", adapters.owned_model_names("SPOKE"))
+        self.assertNotIn("ipaddress", adapters.owned_model_names("HUB"))
 
 
 class OwnerMetadataTypeTestCase(TestCase):
@@ -79,6 +79,9 @@ class OwnerMetadataTypeTestCase(TestCase):
 
         self.assertEqual(set(migration.TRACKED_MODELS), tracked)
         self.assertEqual(migration.METADATA_TYPE_NAME, METADATA_TYPE_NAME)
+
+    def test_migration_seeds_the_default_rules(self):
+        self.assertEqual(migration.DEFAULT_RULES, DEFAULT_OWNERSHIP_RULES)
 
     def test_metadata_type_allows_every_synced_model(self):
         metadata_type = MetadataType.objects.get(name=METADATA_TYPE_NAME)

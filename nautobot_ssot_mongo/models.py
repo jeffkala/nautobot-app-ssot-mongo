@@ -1,8 +1,8 @@
 """Models for nautobot_ssot_mongo.
 
 The app federates Nautobot objects by content type: every type the app can sync has exactly one owning role, and
-that assignment is data, an `OwnershipRule` per type. The rules are defined on the NDP, published to MongoDB by its
-"Nautobot to MongoDB" job and refreshed on every NAP before each of its sync jobs, so every instance syncs the same
+that assignment is data, an `OwnershipRule` per type. The rules are defined on the hub, published to MongoDB by its
+"Nautobot to MongoDB" job and refreshed on every spoke before each of its sync jobs, so every instance syncs the same
 types in the same order.
 """
 
@@ -19,9 +19,9 @@ from nautobot.apps.models import OrganizationalModel, extras_features
 
 from nautobot_ssot_mongo.choices import OwnerRoleChoices
 from nautobot_ssot_mongo.constants import DEFAULT_OWNERSHIP_RULES
-from nautobot_ssot_mongo.roles import ROLE_NAP, get_role
+from nautobot_ssot_mongo.roles import ROLE_SPOKE, get_role
 
-# True while a NAP mirrors the rules the NDP published, and while the Transfer Ownership job moves a type between
+# True while a spoke mirrors the rules the hub published, and while the Transfer Ownership job moves a type between
 # roles: the two writes `OwnershipRule.clean()` refuses from the UI and the API.
 _rules_write_allowed: ContextVar[bool] = ContextVar("nautobot_ssot_mongo_rules_write_allowed", default=False)
 
@@ -58,7 +58,7 @@ class OwnershipRule(OrganizationalModel):  # pylint: disable=too-many-ancestors
         help_text="The federated object type. Only the types this app can sync are offered.",
     )
     owner_role = models.CharField(
-        max_length=3,
+        max_length=5,
         choices=OwnerRoleChoices,
         help_text=(
             "Role whose instances own the objects of this type and publish them to MongoDB. "
@@ -105,19 +105,19 @@ class OwnershipRule(OrganizationalModel):  # pylint: disable=too-many-ancestors
         return model_display_name(model_class) if model_class else self.content_type_label
 
     def clean(self):
-        """Keep the rules in the NDP's hands and keep owner changes on the transfer job.
+        """Keep the rules in the hub's hands and keep owner changes on the transfer job.
 
-        A NAP only mirrors the rules the NDP published, so editing them there would be undone by the next sync and
-        would meanwhile make the NAP publish or pull the wrong types. Changing the owner of a type on the NDP moves
+        A spoke only mirrors the rules the hub published, so editing them there would be undone by the next sync and
+        would meanwhile make the spoke publish or pull the wrong types. Changing the owner of a type on the hub moves
         objects between instances; the Transfer Ownership job does that in the right order.
         """
         super().clean()
         if _rules_write_allowed.get():
             return
-        if get_role() == ROLE_NAP:
+        if get_role() == ROLE_SPOKE:
             raise ValidationError(
-                "Ownership rules are defined on the NDP and synced to every NAP by the sync jobs. "
-                "Edit this rule on the NDP."
+                "Ownership rules are defined on the hub and synced to every spoke by the sync jobs. "
+                "Edit this rule on the hub."
             )
         if self.present_in_database:
             saved_role = OwnershipRule.objects.filter(pk=self.pk).values_list("owner_role", flat=True).first()

@@ -1,1 +1,1 @@
-Added `invoke stress-data`, which creates a large catalog on the NDP or a large inventory on a NAP so the sync jobs can be timed at scale.
+Added `invoke stress-data`, which creates a large catalog on the hub or a large inventory on a spoke so the sync jobs can be timed at scale.

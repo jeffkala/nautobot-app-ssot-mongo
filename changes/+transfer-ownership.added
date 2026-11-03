@@ -1,1 +1,1 @@
-Added the "Transfer Ownership" job, which hands one content type to the other role: it releases or retires the NDP's copies, publishes the rules, and each NAP settles its side on its next sync job.
+Added the "Transfer Ownership" job, which hands one content type to the other role: it releases or retires the hub's copies, publishes the rules, and each spoke settles its side on its next sync job.

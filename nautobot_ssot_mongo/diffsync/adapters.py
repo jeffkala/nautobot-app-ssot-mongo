@@ -1,9 +1,9 @@
 """Diffsync adapters for nautobot_ssot_mongo.
 
-Every adapter knows all synced models. The NDP and NAP subclasses narrow `top_level` to the objects the enabled
+Every adapter knows all synced models. The hub and spoke subclasses narrow `top_level` to the objects the enabled
 `OwnershipRule`s assign to that role, in their sync order, so each sync only moves one owner's objects: the
-"SSoT NDP adapter" pair moves NDP-owned objects between MongoDB and Nautobot, the "SSoT NAP adapter" pair moves
-NAP-owned objects.
+"SSoT hub adapter" pair moves hub-owned objects between MongoDB and Nautobot, the "SSoT spoke adapter" pair moves
+spoke-owned objects.
 """
 
 import logging
@@ -58,7 +58,7 @@ from nautobot_ssot_mongo.diffsync.models import (
 )
 from nautobot_ssot_mongo.models import OwnershipRule
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
-from nautobot_ssot_mongo.roles import ROLE_NAP, ROLE_NDP
+from nautobot_ssot_mongo.roles import ROLE_HUB, ROLE_SPOKE
 from nautobot_ssot_mongo.utils.mongo import get_nautobot_instance
 from nautobot_ssot_mongo.utils.nautobot import check_version_compatibility, get_status_metadata
 
@@ -189,7 +189,7 @@ class MongoRemoteAdapter(Adapter):  # pylint: disable=too-many-instance-attribut
             nautobot_instance (str, optional): Partition this adapter writes to; defaults to the configured
                 `nautobot_instance`.
             read_instances (str | Iterable[str], optional): Partition(s) this adapter loads from; defaults to
-                `nautobot_instance`. The NDP passes every NAP instance here to sync in their objects.
+                `nautobot_instance`. The hub passes every spoke instance here to sync in their objects.
             **kwargs (dict): Arbitrary keyword arguments.
         """
         super().__init__(*args, **kwargs)
@@ -310,16 +310,16 @@ class MongoRemoteAdapter(Adapter):  # pylint: disable=too-many-instance-attribut
         return super().sync_complete(*args, **kwargs)
 
 
-class NDPMongoAdapter(MongoRemoteAdapter):
-    """SSoT NDP adapter, MongoDB side: the objects owned by the NDP."""
+class HubMongoAdapter(MongoRemoteAdapter):
+    """SSoT hub adapter, MongoDB side: the objects owned by the hub."""
 
-    owner_role = ROLE_NDP
+    owner_role = ROLE_HUB
 
 
-class NAPMongoAdapter(MongoRemoteAdapter):
-    """SSoT NAP adapter, MongoDB side: the objects owned by each NAP."""
+class SpokeMongoAdapter(MongoRemoteAdapter):
+    """SSoT spoke adapter, MongoDB side: the objects owned by each spoke."""
 
-    owner_role = ROLE_NAP
+    owner_role = ROLE_SPOKE
 
 
 class MongoNautobotAdapter(NautobotAdapter):
@@ -407,17 +407,17 @@ class MongoNautobotAdapter(NautobotAdapter):
         return super()._load_single_object(database_object, diffsync_model, parameter_names)
 
 
-class NDPNautobotAdapter(MongoNautobotAdapter):
-    """SSoT NDP adapter, Nautobot side: the objects owned by the NDP."""
+class HubNautobotAdapter(MongoNautobotAdapter):
+    """SSoT hub adapter, Nautobot side: the objects owned by the hub."""
 
-    owner_role = ROLE_NDP
-
-
-class NAPNautobotAdapter(MongoNautobotAdapter):
-    """SSoT NAP adapter, Nautobot side: the objects owned by each NAP."""
-
-    owner_role = ROLE_NAP
+    owner_role = ROLE_HUB
 
 
-MONGO_ADAPTERS = {ROLE_NDP: NDPMongoAdapter, ROLE_NAP: NAPMongoAdapter}
-NAUTOBOT_ADAPTERS = {ROLE_NDP: NDPNautobotAdapter, ROLE_NAP: NAPNautobotAdapter}
+class SpokeNautobotAdapter(MongoNautobotAdapter):
+    """SSoT spoke adapter, Nautobot side: the objects owned by each spoke."""
+
+    owner_role = ROLE_SPOKE
+
+
+MONGO_ADAPTERS = {ROLE_HUB: HubMongoAdapter, ROLE_SPOKE: SpokeMongoAdapter}
+NAUTOBOT_ADAPTERS = {ROLE_HUB: HubNautobotAdapter, ROLE_SPOKE: SpokeNautobotAdapter}

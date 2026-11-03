@@ -26,8 +26,8 @@ from nautobot_ssot_mongo.diff import CustomOrderingDiff
 from nautobot_ssot_mongo.diffsync.adapters import (
     MongoNautobotAdapter,
     MongoRemoteAdapter,
-    NAPMongoAdapter,
-    NAPNautobotAdapter,
+    SpokeMongoAdapter,
+    SpokeNautobotAdapter,
 )
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
 from nautobot_ssot_mongo.roles import get_role
@@ -207,7 +207,7 @@ class RoundTripSyncTestCase(TestCase):
 
 
 class NAPOwnedSyncTestCase(TestCase):
-    """Sync the objects owned by NAPs (locations and devices) through MongoDB with the SSoT NAP adapters."""
+    """Sync the objects owned by spokes (locations and devices) through MongoDB with the SSoT spoke adapters."""
 
     def setUp(self):
         super().setUp()
@@ -238,20 +238,20 @@ class NAPOwnedSyncTestCase(TestCase):
     def _nautobot_adapter(self, nautobot_instances=None):
         job = MagicMock()
         job.debug = False
-        adapter = NAPNautobotAdapter(job=job, sync=None, nautobot_instances=nautobot_instances)
+        adapter = SpokeNautobotAdapter(job=job, sync=None, nautobot_instances=nautobot_instances)
         adapter.load()
         return adapter
 
     def _mongo_adapter(self, instance, read_instances=None):
         job = MagicMock()
         job.debug = False
-        adapter = NAPMongoAdapter(
+        adapter = SpokeMongoAdapter(
             job=job, sync=None, client=self.client, nautobot_instance=instance, read_instances=read_instances
         )
         adapter.load()
         return adapter
 
-    def _seed_nap(self, instance, region, site, device_name):
+    def _seed_spoke(self, instance, region, site, device_name):
         self.client.upsert(
             instance,
             "dcim.location",
@@ -287,7 +287,7 @@ class NAPOwnedSyncTestCase(TestCase):
             },
         )
 
-    def test_nap_loads_its_inventory_into_mongo(self):
+    def test_spoke_loads_its_inventory_into_mongo(self):
         active = Status.objects.get(name="Active")
         device = Device.objects.create(
             name="aus-core-01",
@@ -313,29 +313,31 @@ class NAPOwnedSyncTestCase(TestCase):
         Prefix.objects.create(prefix="10.0.0.0/24", namespace=global_namespace, status=active)
         IPAddress.objects.create(address="10.0.0.1/32", namespace=global_namespace, status=active)
 
-        self._nautobot_adapter().sync_to(self._mongo_adapter("NAP-Austin"), diff_class=CustomOrderingDiff)
+        self._nautobot_adapter().sync_to(self._mongo_adapter("SPOKE-Austin"), diff_class=CustomOrderingDiff)
 
-        self.assertEqual(self.client.get("NAP-Austin", "dcim.rack", "Austin__A1")["data"]["rack_group__name"], "Row A")
         self.assertEqual(
-            self.client.get("NAP-Austin", "dcim.interface", "aus-core-01__Austin__Ethernet1")["data"]["type"],
+            self.client.get("SPOKE-Austin", "dcim.rack", "Austin__A1")["data"]["rack_group__name"], "Row A"
+        )
+        self.assertEqual(
+            self.client.get("SPOKE-Austin", "dcim.interface", "aus-core-01__Austin__Ethernet1")["data"]["type"],
             "1000base-t",
         )
         cable = self.client.get(
-            "NAP-Austin", "dcim.cable", "aus-core-01__Austin__Ethernet1__aus-edge-01__Austin__Ethernet1"
+            "SPOKE-Austin", "dcim.cable", "aus-core-01__Austin__Ethernet1__aus-edge-01__Austin__Ethernet1"
         )
         self.assertEqual(cable["data"]["status__name"], "Connected")
-        self.assertEqual(self.client.get("NAP-Austin", "ipam.vlan", "Austin__100")["data"]["name"], "Users")
-        self.assertIsNotNone(self.client.get("NAP-Austin", "ipam.ipaddress", "10.0.0.1__Global"))
+        self.assertEqual(self.client.get("SPOKE-Austin", "ipam.vlan", "Austin__100")["data"]["name"], "Users")
+        self.assertIsNotNone(self.client.get("SPOKE-Austin", "ipam.ipaddress", "10.0.0.1__Global"))
         self.assertEqual(
-            self.client.get("NAP-Austin", "dcim.device", "aus-core-01__Austin")["nautobot_role"], get_role()
+            self.client.get("SPOKE-Austin", "dcim.device", "aus-core-01__Austin")["nautobot_role"], get_role()
         )
 
         self.assertEqual(
-            [document["key"] for document in self.client.find("NAP-Austin", "dcim.location")],
+            [document["key"] for document in self.client.find("SPOKE-Austin", "dcim.location")],
             ["Austin__US-South", "US-South__None"],
         )
         self.assertEqual(
-            self.client.get("NAP-Austin", "dcim.device", "aus-core-01__Austin")["data"],
+            self.client.get("SPOKE-Austin", "dcim.device", "aus-core-01__Austin")["data"],
             {
                 "name": "aus-core-01",
                 "location__name": "Austin",
@@ -351,56 +353,56 @@ class NAPOwnedSyncTestCase(TestCase):
         self.assertEqual(self.client.collection.count_documents({"content_type": "dcim.device"}), 2)
         self.assertEqual(self.client.collection.count_documents({"content_type": "dcim.manufacturer"}), 0)
 
-    def test_ndp_syncs_in_the_objects_of_every_nap(self):
-        self._seed_nap("NAP-Austin", "US-South", "Austin", "aus-core-01")
-        self._seed_nap("NAP-Boston", "US-East", "Boston", "bos-core-01")
+    def test_hub_syncs_in_the_objects_of_every_spoke(self):
+        self._seed_spoke("SPOKE-Austin", "US-South", "Austin", "aus-core-01")
+        self._seed_spoke("SPOKE-Boston", "US-East", "Boston", "bos-core-01")
         self.site.name = "Dublin"
         self.site.validated_save()
 
-        naps = ["NAP-Austin", "NAP-Boston"]
-        source = self._mongo_adapter("NDP", read_instances=naps)
-        source.sync_to(self._nautobot_adapter(nautobot_instances=naps), diff_class=CustomOrderingDiff)
+        spokes = ["SPOKE-Austin", "SPOKE-Boston"]
+        source = self._mongo_adapter("HUB", read_instances=spokes)
+        source.sync_to(self._nautobot_adapter(nautobot_instances=spokes), diff_class=CustomOrderingDiff)
 
         austin = Location.objects.get(name="Austin")
         self.assertEqual(austin.parent.name, "US-South")
         self.assertEqual(austin.tenant, self.tenant)
         self.assertEqual(austin.facility, "AUS1")
-        self.assertEqual(_owner_for(austin), {"owner": "NAP-Austin", "ownership_transferred": True})
+        self.assertEqual(_owner_for(austin), {"owner": "SPOKE-Austin", "ownership_transferred": True})
         self.assertEqual(Location.objects.get(name="Boston").parent.name, "US-East")
         device = Device.objects.get(name="bos-core-01")
         self.assertEqual(device.location.name, "Boston")
         self.assertEqual(device.device_type, self.device_type)
         self.assertEqual(device.platform, self.platform)
         self.assertEqual(device.role, self.role)
-        self.assertEqual(_owner_for(device), {"owner": "NAP-Boston", "ownership_transferred": True})
+        self.assertEqual(_owner_for(device), {"owner": "SPOKE-Boston", "ownership_transferred": True})
         self.assertEqual(Device.objects.count(), 2)
-        # The NDP's own hand-made location is not owned by any NAP, so the scoped pull leaves it alone.
+        # The hub's own hand-made location is not owned by any spoke, so the scoped pull leaves it alone.
         self.assertTrue(Location.objects.filter(name="Dublin").exists())
         self.assertFalse(
-            self._mongo_adapter("NDP", read_instances=naps)
-            .diff_to(self._nautobot_adapter(nautobot_instances=naps), diff_class=CustomOrderingDiff)
+            self._mongo_adapter("HUB", read_instances=spokes)
+            .diff_to(self._nautobot_adapter(nautobot_instances=spokes), diff_class=CustomOrderingDiff)
             .has_diffs()
         )
 
-    def test_ndp_drops_what_a_nap_tombstoned_but_keeps_its_own_objects(self):
-        self._seed_nap("NAP-Austin", "US-South", "Austin", "aus-core-01")
-        naps = ["NAP-Austin"]
-        self._mongo_adapter("NDP", read_instances=naps).sync_to(
-            self._nautobot_adapter(nautobot_instances=naps), diff_class=CustomOrderingDiff
+    def test_hub_drops_what_a_spoke_tombstoned_but_keeps_its_own_objects(self):
+        self._seed_spoke("SPOKE-Austin", "US-South", "Austin", "aus-core-01")
+        spokes = ["SPOKE-Austin"]
+        self._mongo_adapter("HUB", read_instances=spokes).sync_to(
+            self._nautobot_adapter(nautobot_instances=spokes), diff_class=CustomOrderingDiff
         )
         self.assertTrue(Device.objects.filter(name="aus-core-01").exists())
-        self.client.delete("NAP-Austin", "dcim.device", "aus-core-01__Austin")
+        self.client.delete("SPOKE-Austin", "dcim.device", "aus-core-01__Austin")
         Device.objects.create(
-            name="ndp-local-01",
+            name="hub-local-01",
             location=self.site,
             device_type=self.device_type,
             role=self.role,
             status=Status.objects.get(name="Active"),
         )
 
-        self._mongo_adapter("NDP", read_instances=naps).sync_to(
-            self._nautobot_adapter(nautobot_instances=naps), diff_class=CustomOrderingDiff
+        self._mongo_adapter("HUB", read_instances=spokes).sync_to(
+            self._nautobot_adapter(nautobot_instances=spokes), diff_class=CustomOrderingDiff
         )
 
         self.assertFalse(Device.objects.filter(name="aus-core-01").exists())
-        self.assertTrue(Device.objects.filter(name="ndp-local-01").exists())
+        self.assertTrue(Device.objects.filter(name="hub-local-01").exists())

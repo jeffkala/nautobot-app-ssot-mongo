@@ -12,7 +12,7 @@ the Celery worker that executes the SSoT jobs, using the URI and credentials fro
 Operations performed against MongoDB:
 
 - `createIndex` on the configured collection (once, idempotent).
-- `distinct` on `nautobot_instance` when the NDP discovers which NAPs have published data.
+- `distinct` on `nautobot_instance` when the hub discovers which spokes have published data.
 - `find` filtered by `content_type` and one or more `nautobot_instance` values when loading data.
 - `bulkWrite` of `updateOne` operations, `upsert=True` for created or updated documents and a soft-delete update
   for deleted ones, a hundred at a time.
@@ -25,7 +25,7 @@ No inbound integration is required. Other systems interact with the shared Mongo
 ## Nautobot REST API endpoints
 
 The app adds one endpoint, `/api/plugins/ssot-mongo/ownership-rules/`, for the ownership rules (read-only in
-practice on a NAP, where writes are rejected). The sync jobs can be started through the standard Nautobot Jobs
+practice on a spoke, where writes are rejected). The sync jobs can be started through the standard Nautobot Jobs
 REST API, for example:
 
 ```shell

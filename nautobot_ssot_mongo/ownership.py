@@ -1,7 +1,7 @@
 """Move the ownership rules between instances through MongoDB, and settle an owner change locally.
 
-The NDP publishes its rules as documents of the `nautobot_ssot_mongo.ownershiprule` content type in its own
-partition, next to the catalog. A NAP reads them before each sync job and makes its local rules match, so the
+The hub publishes its rules as documents of the `nautobot_ssot_mongo.ownershiprule` content type in its own
+partition, next to the catalog. A spoke reads them before each sync job and makes its local rules match, so the
 sync jobs on every instance agree on which types move in which direction and in what order.
 """
 
@@ -56,9 +56,9 @@ def publish_rules(
     return len(rules)
 
 
-def pull_rules(client: MongoSyncClient, ndp_instance: str) -> List[Dict[str, Any]]:
-    """Return the rule payloads the NDP published, in sync order, or `[]` when it has not published any."""
-    return sorted(client.find_data(ndp_instance, OWNERSHIP_RULES_CONTENT_TYPE), key=lambda data: data["sync_order"])
+def pull_rules(client: MongoSyncClient, hub_instance: str) -> List[Dict[str, Any]]:
+    """Return the rule payloads the hub published, in sync order, or `[]` when it has not published any."""
+    return sorted(client.find_data(hub_instance, OWNERSHIP_RULES_CONTENT_TYPE), key=lambda data: data["sync_order"])
 
 
 def apply_rules(  # pylint: disable=too-many-arguments,too-many-locals
@@ -71,7 +71,7 @@ def apply_rules(  # pylint: disable=too-many-arguments,too-many-locals
 ) -> Dict[str, int]:
     """Make the local ownership rules match `payloads` and settle every owner change they carry.
 
-    Rules missing locally are created, differing ones updated and rules the NDP retired are deleted. A rule whose
+    Rules missing locally are created, differing ones updated and rules the hub retired are deleted. A rule whose
     owner changed also goes through `apply_owner_change`. A payload naming a content type this version of the app
     does not support is skipped with a warning. Returns the counts of rules created, updated, deleted and
     transferred.
@@ -112,7 +112,7 @@ def apply_rules(  # pylint: disable=too-many-arguments,too-many-locals
                 rule.delete()
                 counts["deleted"] += 1
     log.info(
-        "Ownership rules refreshed from the NDP: %d created, %d updated, %d deleted, %d transferred.",
+        "Ownership rules refreshed from the hub: %d created, %d updated, %d deleted, %d transferred.",
         counts["created"],
         counts["updated"],
         counts["deleted"],

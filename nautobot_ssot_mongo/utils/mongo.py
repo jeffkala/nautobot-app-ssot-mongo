@@ -5,8 +5,8 @@ Documents are stored one-per-object in a single collection using this shape:
 ```json
 {
     "_id": "ObjectId(...)",
-    "nautobot_instance": "NAP-Austin",
-    "nautobot_role": "NAP",
+    "nautobot_instance": "SPOKE-Austin",
+    "nautobot_role": "SPOKE",
     "content_type": "dcim.device",
     "key": "aus-core-01__Austin",
     "data": {"name": "aus-core-01", "location__name": "Austin", "...": "..."},
@@ -22,7 +22,7 @@ Documents are stored one-per-object in a single collection using this shape:
 `nautobot_instance` and `content_type`, uniquely identifies a document.
 
 `nautobot_instance` names the Nautobot instance that owns (writes) the document and `nautobot_role` its role. Reads
-may span several instances: the NDP reads the local objects published by every NAP in one query.
+may span several instances: the hub reads the local objects published by every spoke in one query.
 
 Deleting an object soft-deletes its document (a *tombstone*: `deleted: true` plus `deleted_at`). Reads hide
 tombstones by default, an upsert for the same key revives the document in place, and an optional TTL index expires
@@ -40,7 +40,7 @@ from pymongo.errors import PyMongoError
 
 DEFAULT_DATABASE = "nautobot_sync"
 DEFAULT_COLLECTION = "objects"
-DEFAULT_NAUTOBOT_INSTANCE = "NDP"
+DEFAULT_NAUTOBOT_INSTANCE = "HUB"
 DEFAULT_TOMBSTONE_TTL_DAYS = 30
 UNIQUE_INDEX_NAME = "instance_content_type_key_unique"
 TOMBSTONE_TTL_INDEX_NAME = "tombstone_ttl"

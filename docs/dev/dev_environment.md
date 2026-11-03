@@ -50,38 +50,38 @@ The Nautobot server can now be accessed at [http://localhost:8080](http://localh
 
 `docker-compose.mongo.yml` (included in the default `compose_files`) starts a `mongo` service with authentication disabled and points the Nautobot services at it through `NAUTOBOT_SSOT_MONGO_URI=mongodb://mongo:27017/`. Its data lives in the `mongo_data` volume, which `invoke destroy` removes.
 
-- **invoke seed-mongo [--reset]** - Load the sample documents from `development/bin/seed_mongo_sample_data.py` into that MongoDB: the NDP's reference data plus the locations and devices of two sample NAPs, so that the `MongoDB to Nautobot` job has data to sync in either role.
-- **invoke stress-data [--reset]** - Create a large data set on this stack's Nautobot to time the sync jobs at scale: the catalog with 400 device types on the NDP stack, or 100 locations and 3,000 devices with 8 interfaces each on a NAP stack that has pulled that catalog. `--devices`, `--locations`, `--interfaces` and `--device-types` change the sizes; `--reset` removes the objects of an earlier run first. Run it on the NDP, push, pull on the NAP, then run it on the NAP, push, and pull on the NDP with the change log off.
+- **invoke seed-mongo [--reset]** - Load the sample documents from `development/bin/seed_mongo_sample_data.py` into that MongoDB: the hub's reference data plus the locations and devices of two sample spokes, so that the `MongoDB to Nautobot` job has data to sync in either role.
+- **invoke stress-data [--reset]** - Create a large data set on this stack's Nautobot to time the sync jobs at scale: the catalog with 400 device types on the hub stack, or 100 locations and 3,000 devices with 8 interfaces each on a spoke stack that has pulled that catalog. `--devices`, `--locations`, `--interfaces` and `--device-types` change the sizes; `--reset` removes the objects of an earlier run first. Run it on the hub, push, pull on the spoke, then run it on the spoke, push, and pull on the hub with the change log off.
 
 To reach MongoDB from the host (for example with Compass), uncomment the `ports` block in `docker-compose.mongo.yml`. To develop against an external MongoDB instead, remove `docker-compose.mongo.yml` from `compose_files` in `invoke.yml` and set `NAUTOBOT_SSOT_MONGO_URI`, `NAUTOBOT_SSOT_MONGO_USERNAME` and `NAUTOBOT_SSOT_MONGO_PASSWORD` in `development/creds.env`.
 
 Every `invoke start` and `invoke debug` writes the published host port mappings to `.service_ports.json`, listing only the services that publish a port to the host. When ephemeral ports are enabled, Docker assigns dynamic host ports and this file captures the resulting values; with fixed ports it captures the static values instead. You can also inspect them with `invoke ps` or `docker compose port`, for example `docker compose port nautobot 8080`. To enable ephemeral ports with an environment variable, set `INVOKE_NAUTOBOT_SSOT_MONGO_EPHEMERAL_PORTS=1`; to disable them, unset the environment variable, set it to an empty value, or set it to `0`.
 
-#### Second stack: an NDP next to the NAP
+#### Second stack: a hub next to the spoke
 
-The default stack plays a NAP named `NAP-Dev`. To exercise the full NDP/NAP loop against two real Nautobot
-instances, start a second stack that plays the NDP:
+The default stack plays a spoke named `SPOKE-Dev`. To exercise the full hub/spoke loop against two real Nautobot
+instances, start a second stack that plays the hub:
 
 ```shell
 invoke start                      # the default stack, if it is not running yet
-invoke -f invoke.ndp.yml start    # the NDP stack
+invoke -f invoke.hub.yml start    # the hub stack
 ```
 
-`invoke.ndp.yml` is a runtime configuration layered on top of your `invoke.yml`: it switches the compose project
-name to `nautobot-ssot-mongo-ndp` and swaps `docker-compose.mongo.yml` for `docker-compose.ndp.yml`. The NDP stack
+`invoke.hub.yml` is a runtime configuration layered on top of your `invoke.yml`: it switches the compose project
+name to `nautobot-ssot-mongo-hub` and swaps `docker-compose.mongo.yml` for `docker-compose.hub.yml`. The hub stack
 gets its own PostgreSQL, Redis, Nautobot, worker and beat containers, joins the default stack's network to reach the
-shared `mongo` service, runs with `NAUTOBOT_SSOT_MONGO_ROLE=NDP` and `NAUTOBOT_SSOT_MONGO_INSTANCE=NDP`, and publishes
+shared `mongo` service, runs with `NAUTOBOT_SSOT_MONGO_ROLE=HUB` and `NAUTOBOT_SSOT_MONGO_INSTANCE=HUB`, and publishes
 Nautobot on [http://localhost:8081](http://localhost:8081). Its docs service is not started. Every other task works
-the same way with the `-f invoke.ndp.yml` prefix, for example `invoke -f invoke.ndp.yml logs --follow`,
-`invoke -f invoke.ndp.yml nbshell` or `invoke -f invoke.ndp.yml destroy`. The NDP stack records its host ports in
-`.service_ports.nautobot-ssot-mongo-ndp.json`.
+the same way with the `-f invoke.hub.yml` prefix, for example `invoke -f invoke.hub.yml logs --follow`,
+`invoke -f invoke.hub.yml nbshell` or `invoke -f invoke.hub.yml destroy`. The hub stack records its host ports in
+`.service_ports.nautobot-ssot-mongo-hub.json`.
 
 #### Watching the whole loop with Playwright
 
-`development/bin/e2e_ndp_nap.py` drives both stacks from the host in the foreground, with one visible browser
-window per instance, and narrates each step on the terminal. It makes the NDP own a small set of reference data
-and load it into MongoDB, has the NAP sync that data in, creates a location tree and a device on the NAP and loads
-them into MongoDB, then has the NDP sync them in and checks that the device arrived. Playwright is part of the
+`development/bin/e2e_hub_spoke.py` drives both stacks from the host in the foreground, with one visible browser
+window per instance, and narrates each step on the terminal. It makes the hub own a small set of reference data
+and load it into MongoDB, has the spoke sync that data in, creates a location tree and a device on the spoke and loads
+them into MongoDB, then has the hub sync them in and checks that the device arrived. Playwright is part of the
 development dependencies; the browser itself is downloaded once:
 
 ```shell
@@ -91,20 +91,20 @@ invoke e2e                               # starts both stacks, then drives them
 
 `invoke e2e` runs on the host, not in a container, because it opens browser windows. Pass `--no-start` when the
 stacks are already running, `--slow-mo 500` to slow the browser down, `--keep-mongo` to keep the existing
-documents, `--keep-nap-objects` to keep the NAP's existing devices and locations, and `--fresh` to destroy both
+documents, `--keep-spoke-objects` to keep the spoke's existing devices and locations, and `--fresh` to destroy both
 stacks first. The browsers stay open at the end until you press Enter (`--no-hold` closes them immediately). After every job the script reads the SSoT sync log, where DiffSync records per-object errors,
-and stops if any object failed to sync. The run empties the shared collection, recreates the NAP's devices and
-locations, and replaces the NAP's reference data and the NDP's locations and devices with what the other role
+and stops if any object failed to sync. The run empties the shared collection, recreates the spoke's devices and
+locations, and replaces the spoke's reference data and the hub's locations and devices with what the other role
 published, so only use it against the development stacks.
 
 #### Recording a video walkthrough of the UI
 
 `invoke record-walkthrough` records a captioned video of the app's UI across both running stacks, for reviewing
-how the pages, forms, jobs and API look and behave. It drives one headless browser through the NDP (ownership
+how the pages, forms, jobs and API look and behave. It drives one headless browser through the hub (ownership
 rules, filters, detail and edit pages, the owner guard, the Transfer Ownership job as a dry run, the publish job,
-the SSoT dashboard, an owner stamp, the REST API and GraphQL) and then through the NAP (the mirrored rules, the
+the SSoT dashboard, an owner stamp, the REST API and GraphQL) and then through the spoke (the mirrored rules, the
 rejected edit, the pull job as a dry run, an owner stamp and the sync history), drawing a caption on every step
-because the recording has no audio. The only write it performs is the NDP's publish, which is idempotent.
+because the recording has no audio. The only write it performs is the hub's publish, which is idempotent.
 
 ```shell
 invoke record-walkthrough                 # both stacks must be running and migrated

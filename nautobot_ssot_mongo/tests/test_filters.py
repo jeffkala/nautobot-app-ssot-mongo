@@ -15,8 +15,8 @@ class OwnershipRuleFilterTestCase(FilterTestCases.FilterTestCase):  # pylint: di
 
     def test_owner_role(self):
         self.assertQuerysetEqualAndNotEmpty(
-            self.filterset({"owner_role": ["NAP"]}, self.queryset).qs,
-            self.queryset.filter(owner_role="NAP"),
+            self.filterset({"owner_role": ["SPOKE"]}, self.queryset).qs,
+            self.queryset.filter(owner_role="SPOKE"),
         )
 
     def test_content_type(self):

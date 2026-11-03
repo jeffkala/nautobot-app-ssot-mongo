@@ -6,15 +6,15 @@ from nautobot.apps.testing import APIViewTestCases
 
 from nautobot_ssot_mongo.models import OwnershipRule
 
-NDP_SETTINGS = {
+HUB_SETTINGS = {
     **settings.PLUGINS_CONFIG,
-    "nautobot_ssot_mongo": {"mongo_uri": "mongodb://unused/", "nautobot_role": "NDP", "nautobot_instance": "NDP"},
+    "nautobot_ssot_mongo": {"mongo_uri": "mongodb://unused/", "nautobot_role": "HUB", "nautobot_instance": "HUB"},
 }
 
 
-@override_settings(PLUGINS_CONFIG=NDP_SETTINGS)
+@override_settings(PLUGINS_CONFIG=HUB_SETTINGS)
 class OwnershipRuleAPITestCase(APIViewTestCases.APIViewTestCase):  # pylint: disable=too-many-ancestors
-    """Every standard REST API operation on the ownership rules, on the NDP."""
+    """Every standard REST API operation on the ownership rules, on the hub."""
 
     model = OwnershipRule
     choices_fields = ["content_type", "owner_role"]
@@ -25,9 +25,9 @@ class OwnershipRuleAPITestCase(APIViewTestCases.APIViewTestCase):  # pylint: dis
         for model in ("cable", "ipaddress", "vlan"):
             OwnershipRule.objects.get(content_type__model=model).delete()
         cls.create_data = [
-            {"content_type": "dcim.cable", "owner_role": "NAP", "enabled": True, "sync_order": 40},
-            {"content_type": "ipam.ipaddress", "owner_role": "NAP", "enabled": True, "sync_order": 41},
-            {"content_type": "ipam.vlan", "owner_role": "NAP", "enabled": False, "sync_order": 42},
+            {"content_type": "dcim.cable", "owner_role": "SPOKE", "enabled": True, "sync_order": 40},
+            {"content_type": "ipam.ipaddress", "owner_role": "SPOKE", "enabled": True, "sync_order": 41},
+            {"content_type": "ipam.vlan", "owner_role": "SPOKE", "enabled": False, "sync_order": 42},
         ]
         cls.update_data = {"enabled": False, "sync_order": 50}
         cls.bulk_update_data = {"enabled": False}

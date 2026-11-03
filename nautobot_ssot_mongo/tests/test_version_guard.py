@@ -7,7 +7,7 @@ from nautobot.apps.testing import TestCase
 from nautobot_ssot_mongo.utils.nautobot import check_version_compatibility, get_status_metadata
 
 LOCAL = {
-    "nautobot_role": "NDP",
+    "nautobot_role": "HUB",
     "nautobot_version": "3.2.7",
     "nautobot_apps": {"nautobot_ssot": "4.7.0", "nautobot_ssot_mongo": "0.2.0"},
 }
@@ -53,7 +53,7 @@ class VersionGuardTestCase(TestCase):
     def test_status_metadata_describes_this_instance(self):
         metadata = get_status_metadata()
 
-        self.assertIn(metadata["nautobot_role"], ("NDP", "NAP"))
+        self.assertIn(metadata["nautobot_role"], ("HUB", "SPOKE"))
         self.assertTrue(metadata["nautobot_version"])
         self.assertIn("nautobot_ssot_mongo", metadata["nautobot_apps"])
         self.assertIn("nautobot_ssot", metadata["nautobot_apps"])

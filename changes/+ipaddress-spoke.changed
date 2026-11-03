@@ -1,0 +1,1 @@
+Changed the ownership of IP addresses from the hub to the spokes, alongside the devices and interfaces they belong to; `ipam.ipaddress` documents under the hub partition are no longer read.

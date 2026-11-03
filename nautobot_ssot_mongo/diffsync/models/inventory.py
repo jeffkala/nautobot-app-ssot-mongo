@@ -1,4 +1,4 @@
-"""DiffSync models for the inventory objects owned by each NAP.
+"""DiffSync models for the inventory objects owned by each spoke.
 
 Locations, rack groups, racks, devices, interfaces, VLANs, IP addresses and cables. Devices are identified by
 `(name, location__name)`, so interfaces and cables are keyed on the device's location as well.

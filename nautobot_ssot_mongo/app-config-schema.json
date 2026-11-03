@@ -42,21 +42,21 @@
         "nautobot_role": {
             "type": "string",
             "enum": [
-                "NDP",
-                "NAP"
+                "HUB",
+                "SPOKE"
             ],
-            "default": "NDP",
-            "description": "Role of this Nautobot instance. The NDP (Nautobot Data Platform) is the federated instance: it owns and publishes global reference data and syncs in the local data of every NAP. A NAP (Nautobot Automation Platform) owns and publishes its local data (locations, devices) and mirrors the NDP's global data."
+            "default": "HUB",
+            "description": "Role of this Nautobot instance. HUB is the single federated instance: it owns and publishes the global catalog and syncs in the inventory of every spoke. SPOKE owns and publishes its inventory (locations, racks, devices, interfaces, VLANs, IP addresses and cables) and mirrors the hub's catalog."
         },
         "nautobot_instance": {
             "type": "string",
-            "default": "NDP",
+            "default": "HUB",
             "description": "Value stored in each document's nautobot_instance field; this instance only writes documents carrying this value."
         },
-        "ndp_instance": {
+        "hub_instance": {
             "type": "string",
-            "default": "NDP",
-            "description": "nautobot_instance value of the NDP. Only used by a NAP, which reads global objects from this partition. Must differ from nautobot_instance on a NAP."
+            "default": "HUB",
+            "description": "nautobot_instance value of the hub. Only used by a spoke, which reads global objects from this partition. Must differ from nautobot_instance on a spoke."
         },
         "tombstone_ttl_days": {
             "type": "integer",

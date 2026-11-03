@@ -139,11 +139,11 @@ PLUGINS_CONFIG = {
         "mongo_username": os.getenv("NAUTOBOT_SSOT_MONGO_USERNAME", ""),
         "mongo_password": os.getenv("NAUTOBOT_SSOT_MONGO_PASSWORD", ""),
         "mongo_auth_source": os.getenv("NAUTOBOT_SSOT_MONGO_AUTH_SOURCE", "admin"),
-        # The development instance plays a NAP by default so that `invoke seed-mongo` followed by the
-        # "MongoDB to Nautobot" job imports the seeded global reference data. Set NAUTOBOT_SSOT_MONGO_ROLE=NDP and
-        # NAUTOBOT_SSOT_MONGO_INSTANCE=NDP to exercise the NDP role instead.
-        "nautobot_role": os.getenv("NAUTOBOT_SSOT_MONGO_ROLE", "NAP"),
-        "nautobot_instance": os.getenv("NAUTOBOT_SSOT_MONGO_INSTANCE", "NAP-Dev"),
-        "ndp_instance": os.getenv("NAUTOBOT_SSOT_MONGO_NDP_INSTANCE", "NDP"),
+        # The development instance plays a spoke by default so that `invoke seed-mongo` followed by the
+        # "MongoDB to Nautobot" job imports the seeded global reference data. Set NAUTOBOT_SSOT_MONGO_ROLE=HUB and
+        # NAUTOBOT_SSOT_MONGO_INSTANCE=HUB to exercise the hub role instead.
+        "nautobot_role": os.getenv("NAUTOBOT_SSOT_MONGO_ROLE", "SPOKE"),
+        "nautobot_instance": os.getenv("NAUTOBOT_SSOT_MONGO_INSTANCE", "SPOKE-Dev"),
+        "hub_instance": os.getenv("NAUTOBOT_SSOT_MONGO_HUB_INSTANCE", "HUB"),
     },
 }

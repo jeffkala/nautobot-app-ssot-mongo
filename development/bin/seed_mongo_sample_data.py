@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Seed a MongoDB collection with sample documents in the shape the MongoDB SSoT app expects.
 
-The catalog is written under the NDP instance (`--ndp-instance`, default `NDP`) and the inventory (locations, rack
-groups, racks, devices, interfaces, VLANs, IP addresses and cables) under two sample NAP instances, `NAP-Austin`
-and `NAP-Boston`. Every document carries the role and version fields the app stamps, taken from the installed
+The catalog is written under the hub instance (`--hub-instance`, default `HUB`) and the inventory (locations, rack
+groups, racks, devices, interfaces, VLANs, IP addresses and cables) under two sample spoke instances, `SPOKE-Austin`
+and `SPOKE-Boston`. Every document carries the role and version fields the app stamps, taken from the installed
 packages when available, so the loader's version guard accepts them.
 
 This script only depends on `pymongo` so it can run outside of a Nautobot environment, for example:
@@ -21,10 +21,10 @@ from datetime import datetime, timezone
 
 from pymongo import ASCENDING, MongoClient
 
-NDP_INSTANCE = "NDP"
+HUB_INSTANCE = "HUB"
 TOMBSTONE_TTL_SECONDS = 30 * 86400
 
-# (content_type, identifier field names, list of data payloads): the catalog owned by the NDP
+# (content_type, identifier field names, list of data payloads): the catalog owned by the hub
 GLOBAL_SAMPLE_DATA = [
     (
         "dcim.manufacturer",
@@ -232,9 +232,9 @@ GLOBAL_SAMPLE_DATA = [
 ]
 
 
-# NAP instance name -> list of (content_type, identifier field names, list of data payloads) owned by that NAP
+# spoke instance name -> list of (content_type, identifier field names, list of data payloads) owned by that spoke
 LOCAL_SAMPLE_DATA = {
-    "NAP-Austin": [
+    "SPOKE-Austin": [
         (
             "dcim.rackgroup",
             ("location__name", "name"),
@@ -390,7 +390,7 @@ LOCAL_SAMPLE_DATA = {
             ],
         ),
     ],
-    "NAP-Boston": [
+    "SPOKE-Boston": [
         (
             "dcim.location",
             ("name", "parent__name"),
@@ -454,9 +454,9 @@ def parse_args(argv):
     parser.add_argument("--database", default="nautobot_sync", help="Database name (default: nautobot_sync)")
     parser.add_argument("--collection", default="objects", help="Collection name (default: objects)")
     parser.add_argument(
-        "--ndp-instance",
-        default=os.getenv("NAUTOBOT_SSOT_MONGO_NDP_INSTANCE", NDP_INSTANCE),
-        help="Nautobot instance name the global reference data is tagged with (default: NDP)",
+        "--hub-instance",
+        default=os.getenv("NAUTOBOT_SSOT_MONGO_HUB_INSTANCE", HUB_INSTANCE),
+        help="Nautobot instance name the global reference data is tagged with (default: HUB)",
     )
     parser.add_argument("--reset", action="store_true", help="Drop the collection before seeding")
     return parser.parse_args(argv)
@@ -492,7 +492,7 @@ def seed(collection, nautobot_instance, role, sample_data, now):
 
 
 def main(argv=None):
-    """Seed the collection with the NDP's global data and each sample NAP's local data."""
+    """Seed the collection with the hub's global data and each sample spoke's local data."""
     args = parse_args(argv)
     client_kwargs = {"serverSelectionTimeoutMS": 5000}
     if args.username:
@@ -516,9 +516,9 @@ def main(argv=None):
         )
 
     now = datetime.now(timezone.utc)
-    seed(collection, args.ndp_instance, "NDP", GLOBAL_SAMPLE_DATA, now)
-    for nap_instance, sample_data in LOCAL_SAMPLE_DATA.items():
-        seed(collection, nap_instance, "NAP", sample_data, now)
+    seed(collection, args.hub_instance, "HUB", GLOBAL_SAMPLE_DATA, now)
+    for spoke_instance, sample_data in LOCAL_SAMPLE_DATA.items():
+        seed(collection, spoke_instance, "SPOKE", sample_data, now)
     return 0
 
 

@@ -1,1 +1,0 @@
-Both sync jobs on a NAP now refresh the ownership rules from the NDP's partition before loading anything, so the job's data mappings and configuration follow the rules rather than a fixed list.

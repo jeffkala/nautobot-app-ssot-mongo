@@ -7,13 +7,13 @@ from nautobot.apps.testing import ViewTestCases
 
 from nautobot_ssot_mongo.models import OwnershipRule
 
-NDP_SETTINGS = {
+HUB_SETTINGS = {
     **settings.PLUGINS_CONFIG,
-    "nautobot_ssot_mongo": {"mongo_uri": "mongodb://unused/", "nautobot_role": "NDP", "nautobot_instance": "NDP"},
+    "nautobot_ssot_mongo": {"mongo_uri": "mongodb://unused/", "nautobot_role": "HUB", "nautobot_instance": "HUB"},
 }
 
 
-@override_settings(PLUGINS_CONFIG=NDP_SETTINGS)
+@override_settings(PLUGINS_CONFIG=HUB_SETTINGS)
 class OwnershipRuleUIViewTestCase(  # pylint: disable=too-many-ancestors
     ViewTestCases.GetObjectViewTestCase,
     ViewTestCases.GetObjectChangelogViewTestCase,
@@ -25,7 +25,7 @@ class OwnershipRuleUIViewTestCase(  # pylint: disable=too-many-ancestors
     ViewTestCases.BulkEditObjectsViewTestCase,
     ViewTestCases.BulkDeleteObjectsViewTestCase,
 ):
-    """Every standard view of the ownership rules, exercised on the NDP, where they are editable."""
+    """Every standard view of the ownership rules, exercised on the hub, where they are editable."""
 
     model = OwnershipRule
 
@@ -34,5 +34,5 @@ class OwnershipRuleUIViewTestCase(  # pylint: disable=too-many-ancestors
         # The migration seeds a rule for every supported type, so free one up for the create and edit forms.
         cable = ContentType.objects.get(app_label="dcim", model="cable")
         OwnershipRule.objects.get(content_type=cable).delete()
-        cls.form_data = {"content_type": cable.pk, "owner_role": "NDP", "enabled": True, "sync_order": 30}
+        cls.form_data = {"content_type": cable.pk, "owner_role": "HUB", "enabled": True, "sync_order": 30}
         cls.bulk_edit_data = {"enabled": False}

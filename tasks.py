@@ -200,7 +200,7 @@ def dump_service_ports_to_disk(context):
 
         sleep(15)
 
-    # A secondary stack (for example `invoke -f invoke.ndp.yml start`) records its ports in its own file so that it
+    # A secondary stack (for example `invoke -f invoke.hub.yml start`) records its ports in its own file so that it
     # does not overwrite the ports of the default stack.
     project_name = context.nautobot_ssot_mongo.project_name
     filename = ".service_ports.json" if project_name == "nautobot-ssot-mongo" else f".service_ports.{project_name}.json"
@@ -1178,15 +1178,15 @@ def seed_mongo(context, reset=False):
 
 @task(
     help={
-        "devices": "Devices to create on a NAP (default: 3000).",
-        "locations": "Locations to create on a NAP, in two levels (default: 100).",
-        "interfaces": "Interfaces per device on a NAP (default: 8).",
-        "device-types": "Device types to create on the NDP (default: 400).",
+        "devices": "Devices to create on a spoke (default: 3000).",
+        "locations": "Locations to create on a spoke, in two levels (default: 100).",
+        "interfaces": "Interfaces per device on a spoke (default: 8).",
+        "device-types": "Device types to create on the hub (default: 400).",
         "reset": "Remove the stress objects of an earlier run first.",
     }
 )
 def stress_data(context, devices=3000, locations=100, interfaces=8, device_types=400, reset=False):
-    """Create a large data set on this stack's Nautobot: the catalog on the NDP, the inventory on a NAP."""
+    """Create a large data set on this stack's Nautobot: the catalog on the hub, the inventory on a spoke."""
     start(context, service=["nautobot"])
     # Run through `exec` because the nbshell console cannot take blank lines inside function bodies.
     command = "nautobot-server shell --command \"exec(open('development/bin/stress_data.py').read())\""
@@ -1222,22 +1222,22 @@ def record_walkthrough(context, pace=2200, headed=False, output_dir=""):
 
 @task(
     help={
-        "no-start": "Assume the default stack and the NDP stack are already running.",
+        "no-start": "Assume the default stack and the hub stack are already running.",
         "fresh": "Destroy both stacks, including their databases, before starting them.",
         "keep-mongo": "Do not empty the shared MongoDB collection first.",
-        "keep-nap-objects": "Do not remove the NAP's existing devices and locations.",
+        "keep-spoke-objects": "Do not remove the spoke's existing devices and locations.",
         "slow-mo": "Milliseconds to pause between browser actions (default: 250).",
         "no-hold": "Close the browsers as soon as the run finishes instead of waiting for Enter.",
     }
 )
-def e2e(context, no_start=False, fresh=False, keep_mongo=False, keep_nap_objects=False, slow_mo=250, no_hold=False):  # noqa: PLR0913
-    """Drive the full NDP/NAP loop through both Nautobot stacks with a visible browser (runs on the host)."""
-    command = f"python development/bin/e2e_ndp_nap.py --slow-mo {slow_mo}"
+def e2e(context, no_start=False, fresh=False, keep_mongo=False, keep_spoke_objects=False, slow_mo=250, no_hold=False):  # noqa: PLR0913
+    """Drive the full hub/spoke loop through both Nautobot stacks with a visible browser (runs on the host)."""
+    command = f"python development/bin/e2e_hub_spoke.py --slow-mo {slow_mo}"
     for enabled, flag in (
         (no_start, "--no-start"),
         (fresh, "--fresh"),
         (keep_mongo, "--keep-mongo"),
-        (keep_nap_objects, "--keep-nap-objects"),
+        (keep_spoke_objects, "--keep-spoke-objects"),
         (no_hold, "--no-hold"),
     ):
         if enabled:

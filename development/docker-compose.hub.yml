@@ -1,35 +1,35 @@
 ---
-# Second Nautobot stack playing the NDP (Nautobot Data Platform) role next to the default stack, which plays a NAP.
+# Second Nautobot stack playing the hub role next to the default stack, which plays a spoke.
 #
-# Start it with `invoke -f invoke.ndp.yml start` (and stop/destroy/logs/nbshell it the same way). It runs its own
-# PostgreSQL, Redis, Nautobot, worker and beat under the compose project `nautobot-ssot-mongo-ndp`, shares the
+# Start it with `invoke -f invoke.hub.yml start` (and stop/destroy/logs/nbshell it the same way). It runs its own
+# PostgreSQL, Redis, Nautobot, worker and beat under the compose project `nautobot-ssot-mongo-hub`, shares the
 # MongoDB of the default stack by joining that stack's network, and publishes Nautobot on http://localhost:8081.
 # The docs service is not started for this stack.
-x-ndp: &ndp
+x-hub: &hub
   environment:
-    - "NAUTOBOT_SSOT_MONGO_ROLE=NDP"
-    - "NAUTOBOT_SSOT_MONGO_INSTANCE=NDP"
+    - "NAUTOBOT_SSOT_MONGO_ROLE=HUB"
+    - "NAUTOBOT_SSOT_MONGO_INSTANCE=HUB"
     - "NAUTOBOT_SSOT_MONGO_URI=mongodb://mongo:27017/"
-    - "NAUTOBOT_BANNER_TOP=NDP"
+    - "NAUTOBOT_BANNER_TOP=HUB"
   networks:
     - "default"
-    - "nap_stack"
+    - "spoke_stack"
 
 services:
   nautobot:
-    <<: *ndp
+    <<: *hub
     ports: !override
       - "8081:8080"
   worker:
-    <<: *ndp
+    <<: *hub
   beat:
-    <<: *ndp
+    <<: *hub
   docs:
     profiles:
       - "docs"
 
 networks:
   # Network of the default stack, where the shared `mongo` service lives. Start the default stack first.
-  nap_stack:
+  spoke_stack:
     name: "nautobot-ssot-mongo_default"
     external: true

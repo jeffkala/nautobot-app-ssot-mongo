@@ -1,8 +1,8 @@
 """DiffSync models for nautobot_ssot_mongo.
 
 Each synced object type has two DiffSync models that share identifiers and attributes: a Nautobot-side model
-(`*SSoTModel`) and a MongoDB-side model (`Remote*SSoTModel`). The catalog models are owned by the NDP, the
-inventory models by each NAP (see `nautobot_ssot_mongo.roles`).
+(`*SSoTModel`) and a MongoDB-side model (`Remote*SSoTModel`). The catalog models are owned by the hub, the
+inventory models by each spoke (see `nautobot_ssot_mongo.roles`).
 """
 
 from nautobot_ssot_mongo.diffsync.models.catalog import (

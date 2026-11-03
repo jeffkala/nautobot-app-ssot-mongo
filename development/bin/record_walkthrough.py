@@ -1,21 +1,21 @@
 #!/usr/bin/env python
-"""Record a captioned video walkthrough of the app's UI across the NDP and NAP development stacks.
+"""Record a captioned video walkthrough of the app's UI across the hub and spoke development stacks.
 
 The script drives one headless Chromium session through both Nautobot stacks of the development environment,
 narrates every step with a caption drawn on the page (the recording has no audio) and saves the session as a
 `.webm` file. Watch it to review how the app's elements look, behave and interact:
 
-- the NDP (`invoke -f invoke.ndp.yml start`, http://localhost:8081): the ownership rules list, filters, detail
+- the hub (`invoke -f invoke.hub.yml start`, http://localhost:8081): the ownership rules list, filters, detail
   page and edit form, the guard on owner changes, the Transfer Ownership job (dry run), the Nautobot to MongoDB
   job publishing the catalog and the rules, the SSoT dashboard, the owner stamp on a synced object, the REST API
   and GraphQL;
-- the NAP (`invoke start`, http://localhost:8080): the same rules as a read-only mirror, the rejected edit, the
+- the spoke (`invoke start`, http://localhost:8080): the same rules as a read-only mirror, the rejected edit, the
   MongoDB to Nautobot job (dry run) refreshing the rules first, the owner stamp on a catalog object, and the
   sync history.
 
-Jobs that write are limited to the NDP's publish, which is idempotent; everything else is a dry run or a read.
-The two stacks must be running and migrated, and the three app jobs enabled on the NDP (the two sync jobs on the
-NAP). The NDP half runs first and the NAP half second, so the single browser session only ever holds one login:
+Jobs that write are limited to the hub's publish, which is idempotent; everything else is a dry run or a read.
+The two stacks must be running and migrated, and the three app jobs enabled on the hub (the two sync jobs on the
+spoke). The hub half runs first and the spoke half second, so the single browser session only ever holds one login:
 both stacks sit on localhost, where cookies ignore the port.
 
     invoke record-walkthrough              # or: poetry run python development/bin/record_walkthrough.py
@@ -35,8 +35,8 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DEFAULT_OUTPUT_DIR = os.path.join(REPO_ROOT, "development", "recordings")
-NAP_URL = "http://localhost:8080"
-NDP_URL = "http://localhost:8081"
+SPOKE_URL = "http://localhost:8080"
+HUB_URL = "http://localhost:8081"
 RULES_PATH = "/plugins/ssot-mongo/ownership-rules/"
 SOURCE_JOB = "nautobot_ssot_mongo.jobs.MongoDataSource"
 TARGET_JOB = "nautobot_ssot_mongo.jobs.MongoDataTarget"
@@ -195,19 +195,19 @@ class Walkthrough:
 # -- scenes ----------------------------------------------------------------------------------------------------------
 
 
-def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-many-statements
-    """Everything the NDP shows: the rules, their guards, the jobs, the dashboard, the API."""
-    walk.use("NDP", NDP_URL)
-    walk.page.goto(f"{NDP_URL}/login/")
+def hub_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-many-statements
+    """Everything the hub shows: the rules, their guards, the jobs, the dashboard, the API."""
+    walk.use("HUB", HUB_URL)
+    walk.page.goto(f"{HUB_URL}/login/")
     walk.card(
-        "Nautobot SSoT MongoDB: the NDP",
+        "Nautobot SSoT MongoDB: the hub",
         [
-            "The NDP (Nautobot Data Platform) owns the catalog and syncs in the inventory every NAP publishes.",
+            "The hub owns the catalog and syncs in the inventory every spoke publishes.",
             "This part shows the ownership rules, the guards on them, the jobs and the owner stamps.",
         ],
     )
     walk.login(username, password)
-    walk.show("/", "Home", "The NDP's home page. The app lives under Apps > MongoDB SSoT.", 0.8)
+    walk.show("/", "Home", "The hub's home page. The app lives under Apps > MongoDB SSoT.", 0.8)
 
     walk.show(
         RULES_PATH,
@@ -217,8 +217,12 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
         1.6,
     )
     walk.scroll(400)
-    walk.caption("Ownership Rules", "Catalog types belong to the NDP (blue), inventory types to the NAPs (teal).", 1.0)
-    walk.show(f"{RULES_PATH}?owner_role=NAP", "Filtering", "Filtered on owner role = NAP: the inventory types.", 1.2)
+    walk.caption(
+        "Ownership Rules", "Catalog types belong to the hub (blue), inventory types to the spokes (teal).", 1.0
+    )
+    walk.show(
+        f"{RULES_PATH}?owner_role=SPOKE", "Filtering", "Filtered on owner role = spoke: the inventory types.", 1.2
+    )
     walk.show(f"{RULES_PATH}?q=tenan", "Searching", "The search box matches the app label or the model name.", 1.0)
 
     vlan = walk.first(RULES_PATH, content_type="ipam.vlan")
@@ -226,7 +230,7 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
     walk.show(
         rule_url,
         "Rule detail",
-        "Left: the rule's fields. Right: where the rule is maintained, which on the NDP points at the "
+        "Left: the rule's fields. Right: where the rule is maintained, which on the hub points at the "
         "Transfer Ownership job for owner changes. Standard tabs: Advanced, Notes, Change Log.",
         1.8,
     )
@@ -240,10 +244,10 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
     walk.page.set_checked("#id_enabled", False)
     walk.page.click("button[name=_update]")
     walk.page.wait_for_load_state("networkidle")
-    walk.caption("Editing a rule", "Saved. The next Nautobot to MongoDB run publishes the rules to every NAP.", 1.2)
+    walk.caption("Editing a rule", "Saved. The next Nautobot to MongoDB run publishes the rules to every spoke.", 1.2)
 
     walk.show(f"{rule_url}edit/", "The owner guard", "Trying to change the owner through the form.", 1.0)
-    walk.page.locator("#id_owner_role").select_option("NDP", force=True)
+    walk.page.locator("#id_owner_role").select_option("HUB", force=True)
     walk.page.click("button[name=_update]")
     walk.page.wait_for_load_state("networkidle")
     walk.caption(
@@ -251,7 +255,7 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
         "Rejected: changing an owner moves objects between instances, so it is a job, not an edit.",
         1.8,
     )
-    walk.page.locator("#id_owner_role").select_option("NAP", force=True)
+    walk.page.locator("#id_owner_role").select_option("SPOKE", force=True)
     walk.page.set_checked("#id_enabled", True)
     walk.page.click("button[name=_update]")
     walk.page.wait_for_load_state("networkidle")
@@ -275,15 +279,15 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
     walk.run_job(
         TRANSFER_JOB,
         "Transfer Ownership (dry run)",
-        "Hands a type to the other role. Dry run reports the direction and what the NDP would release or retire.",
+        "Hands a type to the other role. Dry run reports the direction and what the hub would release or retire.",
         dryrun=True,
         fill=pick_vlan,
     )
     walk.run_job(
         TARGET_JOB,
         "Nautobot to MongoDB",
-        "The NDP publishes its catalog. Since this release it publishes the ownership rules first, "
-        "so every NAP mirrors them before its next job.",
+        "The hub publishes its catalog. Since this release it publishes the ownership rules first, "
+        "so every spoke mirrors them before its next job.",
         dryrun=False,
     )
 
@@ -312,13 +316,13 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
         walk.show(
             f"/dcim/devices/{device['id']}/",
             "A synced object",
-            "A device pulled from a NAP. The Object Metadata tab holds the SSoT MongoDB Owner stamp.",
+            "A device pulled from a spoke. The Object Metadata tab holds the SSoT MongoDB Owner stamp.",
             1.0,
         )
         walk.show(
             f"/dcim/devices/{device['id']}/object-metadata/",
             "Owner stamp",
-            "The stamp names the NAP that published the object; pulls reconcile only stamped objects.",
+            "The stamp names the spoke that published the object; pulls reconcile only stamped objects.",
             1.6,
         )
 
@@ -344,33 +348,33 @@ def ndp_scenes(walk: Walkthrough, username, password):  # pylint: disable=too-ma
         walk.caption("GraphQL", "GraphiQL could not be driven here; the type is listed in the schema docs.", 0.8)
 
 
-def nap_scenes(walk: Walkthrough, username, password):
-    """Everything the NAP shows: the mirrored rules, the rejected edit, the refreshing pull, the stamps."""
-    walk.use("NAP", NAP_URL)
-    walk.page.goto(f"{NAP_URL}/login/")
+def spoke_scenes(walk: Walkthrough, username, password):
+    """Everything the spoke shows: the mirrored rules, the rejected edit, the refreshing pull, the stamps."""
+    walk.use("SPOKE", SPOKE_URL)
+    walk.page.goto(f"{SPOKE_URL}/login/")
     walk.card(
-        "The NAP (NAP-Dev)",
+        "The spoke (SPOKE-Dev)",
         [
-            "A NAP (Nautobot Automation Platform) owns its inventory and mirrors the NDP's catalog.",
+            "A spoke owns its inventory and mirrors the hub's catalog.",
             "It also mirrors the ownership rules: they are refreshed from MongoDB before each sync job.",
         ],
     )
     walk.login(username, password)
-    walk.show(RULES_PATH, "Ownership Rules on a NAP", "The same rules, mirrored from the NDP's partition.", 1.2)
+    walk.show(RULES_PATH, "Ownership Rules on a spoke", "The same rules, mirrored from the hub's partition.", 1.2)
     rule = walk.first(RULES_PATH, content_type="ipam.vlan")
     rule_url = f"{RULES_PATH}{rule['id']}/"
-    walk.show(rule_url, "Rule detail on a NAP", "The notice explains that the rules are read-only here.", 1.4)
-    walk.show(f"{rule_url}edit/", "Editing on a NAP", "Trying to disable the rule on the NAP.", 0.8)
+    walk.show(rule_url, "Rule detail on a spoke", "The notice explains that the rules are read-only here.", 1.4)
+    walk.show(f"{rule_url}edit/", "Editing on a spoke", "Trying to disable the rule on the spoke.", 0.8)
     walk.page.set_checked("#id_enabled", False)
     walk.page.click("button[name=_update]")
     walk.page.wait_for_load_state("networkidle")
-    walk.caption("Editing on a NAP", "Rejected: edit the rule on the NDP; the sync jobs bring it here.", 1.6)
+    walk.caption("Editing on a spoke", "Rejected: edit the rule on the hub; the sync jobs bring it here.", 1.6)
 
     walk.run_job(
         SOURCE_JOB,
         "MongoDB to Nautobot (dry run)",
-        "The NAP pulls the catalog. The job first refreshes the ownership rules from the NDP's partition, "
-        "then computes the diff of the NDP-owned types.",
+        "The spoke pulls the catalog. The job first refreshes the ownership rules from the hub's partition, "
+        "then computes the diff of the hub-owned types.",
         dryrun=True,
     )
 
@@ -379,15 +383,17 @@ def nap_scenes(walk: Walkthrough, username, password):
         walk.show(
             f"/dcim/manufacturers/{manufacturer['id']}/object-metadata/",
             "Owner stamp on a catalog object",
-            "A manufacturer pulled from the NDP carries the NDP as owner; a pull never touches unstamped objects.",
+            "A manufacturer pulled from the hub carries the hub as owner; a pull never touches unstamped objects.",
             1.6,
         )
-    walk.show(f"/plugins/ssot/data-source/{SOURCE_JOB}/", "Data source detail", "The NAP's view of the pull job.", 1.2)
-    walk.show("/plugins/ssot/history/", "Sync history", "Recent runs on this NAP.", 1.0)
+    walk.show(
+        f"/plugins/ssot/data-source/{SOURCE_JOB}/", "Data source detail", "The spoke's view of the pull job.", 1.2
+    )
+    walk.show("/plugins/ssot/history/", "Sync history", "Recent runs on this spoke.", 1.0)
     walk.card(
         "End of walkthrough",
         [
-            "Rules are defined on the NDP, published with its catalog, mirrored by every NAP before each job.",
+            "Rules are defined on the hub, published with its catalog, mirrored by every spoke before each job.",
             "Owner changes go through Transfer Ownership; each instance settles its own copies on its next run.",
         ],
         hold=2.5,
@@ -421,8 +427,8 @@ def main(argv=None):
         page = context.new_page()
         walk = Walkthrough(page, args.pace)
         try:
-            ndp_scenes(walk, args.username, args.password)
-            nap_scenes(walk, args.username, args.password)
+            hub_scenes(walk, args.username, args.password)
+            spoke_scenes(walk, args.username, args.password)
         finally:
             video = page.video
             context.close()

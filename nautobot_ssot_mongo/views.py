@@ -6,14 +6,14 @@ from nautobot.apps.views import NautobotUIViewSet
 from nautobot_ssot_mongo import filters, forms, tables
 from nautobot_ssot_mongo.api import serializers
 from nautobot_ssot_mongo.models import OwnershipRule
-from nautobot_ssot_mongo.roles import ROLE_NAP, get_role
+from nautobot_ssot_mongo.roles import ROLE_SPOKE, get_role
 
-NAP_NOTICE = (
-    "This instance is a NAP. Ownership rules are defined on the NDP and refreshed here by the sync jobs; "
+SPOKE_NOTICE = (
+    "This instance is a spoke. Ownership rules are defined on the hub and refreshed here by the sync jobs; "
     "changes made on this instance are rejected."
 )
-NDP_NOTICE = (
-    "This instance is the NDP. The next **Nautobot to MongoDB** run publishes these rules to every NAP. "
+HUB_NOTICE = (
+    "This instance is the hub. The next **Nautobot to MongoDB** run publishes these rules to every spoke. "
     "To hand a type to the other role, run the **Transfer Ownership** job rather than editing its owner."
 )
 
@@ -50,5 +50,5 @@ class OwnershipRuleUIViewSet(NautobotUIViewSet):
     def get_extra_context(self, request, instance=None):
         """Tell the reader whether this instance defines the rules or mirrors them."""
         context = super().get_extra_context(request, instance=instance)
-        context["ownership_notice"] = NAP_NOTICE if get_role() == ROLE_NAP else NDP_NOTICE
+        context["ownership_notice"] = SPOKE_NOTICE if get_role() == ROLE_SPOKE else HUB_NOTICE
         return context

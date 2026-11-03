@@ -18,7 +18,7 @@ from nautobot.dcim.models import (
 from nautobot.extras.models import Role, Status
 from nautobot.ipam.models import VLAN
 
-from nautobot_ssot_mongo.diffsync.adapters import NAPNautobotAdapter
+from nautobot_ssot_mongo.diffsync.adapters import SpokeNautobotAdapter
 from nautobot_ssot_mongo.diffsync.models import CableSSoTModel, VLANSSoTModel
 
 
@@ -57,7 +57,7 @@ class InventoryFixturesMixin:  # pylint: disable=too-few-public-methods
     def _adapter(self):
         job = MagicMock()
         job.debug = False
-        adapter = NAPNautobotAdapter(job=job, sync=None)
+        adapter = SpokeNautobotAdapter(job=job, sync=None)
         adapter.top_level = ["cable", "vlan"]
         return adapter
 
