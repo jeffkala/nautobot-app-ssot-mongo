@@ -97,6 +97,24 @@ and stops if any object failed to sync. The run empties the shared collection, r
 locations, and replaces the NAP's reference data and the NDP's locations and devices with what the other role
 published, so only use it against the development stacks.
 
+#### Recording a video walkthrough of the UI
+
+`invoke record-walkthrough` records a captioned video of the app's UI across both running stacks, for reviewing
+how the pages, forms, jobs and API look and behave. It drives one headless browser through the NDP (ownership
+rules, filters, detail and edit pages, the owner guard, the Transfer Ownership job as a dry run, the publish job,
+the SSoT dashboard, an owner stamp, the REST API and GraphQL) and then through the NAP (the mirrored rules, the
+rejected edit, the pull job as a dry run, an owner stamp and the sync history), drawing a caption on every step
+because the recording has no audio. The only write it performs is the NDP's publish, which is idempotent.
+
+```shell
+invoke record-walkthrough                 # both stacks must be running and migrated
+invoke record-walkthrough --pace 3500     # linger longer on each caption
+```
+
+The `.webm` file lands in `development/recordings/`, which git ignores; browsers and VLC play it directly. The
+script logs in as the development superuser (`NAUTOBOT_SUPERUSER_NAME` / `NAUTOBOT_SUPERUSER_PASSWORD`, default
+`admin` / `admin`).
+
 To either stop or destroy the development environment use the following options.
 
 - **invoke stop** - Stop the containers, but keep all underlying systems intact

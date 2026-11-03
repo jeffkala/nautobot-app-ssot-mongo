@@ -1,0 +1,1 @@
+Added `invoke record-walkthrough`, which records a captioned video walkthrough of the app's UI across the two development stacks with Playwright.

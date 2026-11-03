@@ -1205,6 +1205,23 @@ def stress_data(context, devices=3000, locations=100, interfaces=8, device_types
 
 @task(
     help={
+        "pace": "Base pause after each caption, in milliseconds (default: 2200).",
+        "headed": "Show the browser window while recording.",
+        "output-dir": "Directory the .webm file is written to (default: development/recordings).",
+    }
+)
+def record_walkthrough(context, pace=2200, headed=False, output_dir=""):
+    """Record a captioned video walkthrough of the app's UI across both running stacks (runs on the host)."""
+    command = f"python development/bin/record_walkthrough.py --pace {pace}"
+    if headed:
+        command += " --headed"
+    if output_dir:
+        command += f" --output-dir {output_dir}"
+    context.run(command, pty=True)
+
+
+@task(
+    help={
         "no-start": "Assume the default stack and the NDP stack are already running.",
         "fresh": "Destroy both stacks, including their databases, before starting them.",
         "keep-mongo": "Do not empty the shared MongoDB collection first.",

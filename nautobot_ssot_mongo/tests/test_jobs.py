@@ -13,7 +13,7 @@ from pymongo.errors import PyMongoError
 
 from nautobot_ssot_mongo.constants import JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
 from nautobot_ssot_mongo.diff import CustomOrderingDiff
-from nautobot_ssot_mongo.diffsync.adapters import NAP_MODELS, NDP_MODELS
+from nautobot_ssot_mongo.diffsync.adapters import owned_model_names
 from nautobot_ssot_mongo.jobs import (
     REMOTE_INSTANCES_CACHE_KEY,
     MongoDataSource,
@@ -67,7 +67,7 @@ class RoleDrivenJobTestCase(TestCase):
 
         job.load_source_adapter()
 
-        self.assertEqual(job.source_adapter.top_level, NDP_MODELS)
+        self.assertEqual(job.source_adapter.top_level, owned_model_names("NDP"))
         self.assertEqual(job.source_adapter.read_instances, ["NDP"])
         self.assertEqual([m.name for m in job.source_adapter.get_all("manufacturer")], ["Cisco"])
         self.assertEqual(MongoDataSource.owner_role(), "NDP")
@@ -91,7 +91,7 @@ class RoleDrivenJobTestCase(TestCase):
 
         job.load_source_adapter()
 
-        self.assertEqual(job.source_adapter.top_level, NAP_MODELS)
+        self.assertEqual(job.source_adapter.top_level, owned_model_names("NAP"))
         self.assertEqual(job.source_adapter.read_instances, ["NAP-Austin", "NAP-Boston"])
         self.assertEqual({m.name for m in job.source_adapter.get_all("location")}, {"Austin", "Boston"})
         self.assertNotIn("NDP instance", MongoDataSource.config_information())
@@ -138,10 +138,10 @@ class RoleDrivenJobTestCase(TestCase):
 
         job.load_target_adapter()
 
-        self.assertEqual(job.target_adapter.top_level, NDP_MODELS)
+        self.assertEqual(job.target_adapter.top_level, owned_model_names("NDP"))
         self.assertEqual(job.target_adapter.nautobot_instance, "NDP")
         self.assertEqual(job.target_adapter.read_instances, "NDP")
-        self.assertEqual(job.get_nautobot_adapter().top_level, NDP_MODELS)
+        self.assertEqual(job.get_nautobot_adapter().top_level, owned_model_names("NDP"))
         self.assertIsNone(job.get_nautobot_adapter().nautobot_instances)
 
     @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Boston"))
@@ -160,9 +160,9 @@ class RoleDrivenJobTestCase(TestCase):
 
         job.load_target_adapter()
 
-        self.assertEqual(job.target_adapter.top_level, NAP_MODELS)
+        self.assertEqual(job.target_adapter.top_level, owned_model_names("NAP"))
         self.assertEqual(job.target_adapter.nautobot_instance, "NAP-Dev")
-        self.assertEqual(job.get_nautobot_adapter().top_level, NAP_MODELS)
+        self.assertEqual(job.get_nautobot_adapter().top_level, owned_model_names("NAP"))
         self.assertEqual(
             [mapping.target_name for mapping in MongoDataTarget.data_mappings()],
             ["Location", "Rack Group", "Rack", "Device", "Interface", "VLAN", "IP Address", "Cable"],

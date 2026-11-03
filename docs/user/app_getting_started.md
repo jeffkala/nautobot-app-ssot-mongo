@@ -12,7 +12,9 @@ To install the App, please follow the instructions detailed in the [Installation
    NAP, `ndp_instance`) in `PLUGINS_CONFIG` as described in the
    [Installation Guide](../admin/install.md#app-configuration) and restart Nautobot.
 2. Navigate to **Jobs > Jobs**, open **MongoDB SSoT**, and enable the `MongoDB to Nautobot` and
-   `Nautobot to MongoDB` jobs (jobs are disabled by default).
+   `Nautobot to MongoDB` jobs (jobs are disabled by default). On the NDP, also enable `Transfer Ownership` if you
+   intend to move a type between roles, and review **Apps > MongoDB SSoT > Ownership Rules**: the default rules
+   give the NDP the catalog and the NAPs the inventory.
 3. On the NDP, run **Nautobot to MongoDB** with *Dry run* checked. The job loads the catalog from Nautobot and from
    MongoDB and shows the resulting diff without changing anything. Run it again with *Dry run* unchecked to publish
    the documents; the database, collection and indexes are created automatically on first use.

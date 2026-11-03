@@ -8,17 +8,17 @@ from pymongo.errors import BulkWriteError
 
 from nautobot_ssot_mongo.constants import MONGO_BATCH_LIMIT
 from nautobot_ssot_mongo.diffsync.adapters import (
-    NAP_MODELS,
-    NDP_MODELS,
     TOP_LEVEL,
     MongoRemoteAdapter,
     NAPMongoAdapter,
     NAPNautobotAdapter,
     NDPMongoAdapter,
     NDPNautobotAdapter,
+    owned_model_names,
     parents_first,
     sort_related_dicts,
 )
+from nautobot_ssot_mongo.models import OwnershipRule, ownership_rules_writable
 from nautobot_ssot_mongo.roles import get_role
 from nautobot_ssot_mongo.utils.mongo import MongoSyncClient
 
@@ -164,12 +164,29 @@ class MongoRemoteAdapterTestCase(TestCase):
         )
 
     def test_owner_adapters_only_process_their_owners_models(self):
-        self.assertEqual(NDPMongoAdapter.top_level, NDP_MODELS)
-        self.assertEqual(NAPMongoAdapter.top_level, NAP_MODELS)
-        self.assertEqual(NDPNautobotAdapter.top_level, NDP_MODELS)
-        self.assertEqual(NAPNautobotAdapter.top_level, NAP_MODELS)
-        self.assertEqual(set(NDP_MODELS) & set(NAP_MODELS), set())
-        self.assertEqual(NDP_MODELS + NAP_MODELS, TOP_LEVEL)
+        ndp_models = owned_model_names("NDP")
+        nap_models = owned_model_names("NAP")
+
+        self.assertEqual(build_adapter(adapter_class=NDPMongoAdapter).top_level, ndp_models)
+        self.assertEqual(build_adapter(adapter_class=NAPMongoAdapter).top_level, nap_models)
+        self.assertEqual(NDPNautobotAdapter(job=MagicMock(), sync=None).top_level, ndp_models)
+        self.assertEqual(NAPNautobotAdapter(job=MagicMock(), sync=None).top_level, nap_models)
+        self.assertEqual(set(ndp_models) & set(nap_models), set())
+        self.assertEqual(ndp_models + nap_models, TOP_LEVEL)
+
+    def test_owner_adapters_follow_the_rules_as_they_change(self):
+        with ownership_rules_writable():
+            rule = OwnershipRule.objects.get(content_type__model="cable")
+            rule.enabled = False
+            rule.validated_save()
+            rule = OwnershipRule.objects.get(content_type__model="prefix")
+            rule.owner_role = "NAP"
+            rule.sync_order = 50
+            rule.validated_save()
+
+        self.assertNotIn("cable", build_adapter(adapter_class=NAPMongoAdapter).top_level)
+        self.assertEqual(build_adapter(adapter_class=NAPMongoAdapter).top_level[-1], "prefix")
+        self.assertNotIn("prefix", build_adapter(adapter_class=NDPMongoAdapter).top_level)
 
 
 class ParentsFirstTestCase(TestCase):

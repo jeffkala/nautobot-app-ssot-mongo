@@ -260,6 +260,21 @@ class MongoSyncClient:
         """Soft-delete one document (turn it into a tombstone) and return the number of documents changed."""
         return self.write_batch([self.delete_operation(nautobot_instance, content_type, key, metadata=metadata)])
 
+    def tombstone_content_type(
+        self, nautobot_instance: str, content_type: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """Soft-delete every live document of `content_type` in one partition and return how many were changed.
+
+        Used when a type passes to the other role: the documents the previous owner published must stop being
+        read, while a re-publication by the new owner can still revive each one in place.
+        """
+        now = datetime.now(timezone.utc)
+        result = self.collection.update_many(
+            self._filter(nautobot_instance, content_type),
+            {"$set": {"deleted": True, "deleted_at": now, "updated_at": now, **(metadata or {})}},
+        )
+        return result.modified_count
+
     def purge(self, nautobot_instance: str, content_type: str, key: str) -> int:
         """Physically remove a document, tombstone or not, and return the number of removed documents."""
         return self.collection.delete_one(

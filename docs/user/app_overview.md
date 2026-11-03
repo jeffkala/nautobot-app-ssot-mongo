@@ -28,8 +28,14 @@ created itself. The app provides two jobs whose behaviour follows the `nautobot_
 
 ### Object ownership
 
-Every object type is owned by exactly one role. The **NDP** owns the catalog, synchronized in this dependency
-order:
+Every object type is owned by exactly one role. The assignment is an **ownership rule** per type, listed under
+**Apps > MongoDB SSoT > Ownership Rules**: the owning role, whether the type is synced at all and its position in
+the sync order. The rules are defined on the NDP, published to MongoDB by its **Nautobot to MongoDB** job and
+mirrored by every NAP before each of its sync jobs, so they cannot be edited on a NAP. Handing a type to the other
+role is done with the **Transfer Ownership** job rather than by editing the rule (see
+[Using the App](app_use_cases.md#change-which-role-owns-a-type)).
+
+By default the **NDP** owns the catalog, synchronized in this dependency order:
 
 | Nautobot model | `content_type` | Identifiers |
 | --- | --- | --- |
@@ -44,7 +50,7 @@ order:
 | Role | `extras.role` | `name` |
 | Prefix | `ipam.prefix` | `network`, `prefix_length`, `namespace__name` |
 
-Each **NAP** owns its inventory:
+By default each **NAP** owns its inventory:
 
 | Nautobot model | `content_type` | Identifiers |
 | --- | --- | --- |
@@ -119,7 +125,9 @@ adapter" is the `NAPMongoAdapter` / `NAPNautobotAdapter` pair; each pair only kn
 
 ### Extras
 
-- Jobs: `MongoDB to Nautobot` and `Nautobot to MongoDB`.
+- Jobs: `MongoDB to Nautobot`, `Nautobot to MongoDB` and `Transfer Ownership`.
 - Metadata: the data migration creates the **SSoT MongoDB Owner** metadata type (JSON) attached to the eighteen
   synced models. Do not rename it or detach content types from it; the pull jobs rely on it.
-- No custom fields, relationships or database models are added by this app.
+- Model: `OwnershipRule`, one per synced content type, with list, detail and edit views, a REST API endpoint
+  (`/api/plugins/ssot-mongo/ownership-rules/`) and a GraphQL type. The data migration seeds the default rules.
+- No custom fields or relationships are added by this app.

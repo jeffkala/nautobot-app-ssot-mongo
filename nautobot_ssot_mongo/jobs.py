@@ -15,8 +15,9 @@ the same sequence for one owner's objects:
 | NDP  | loads the NDP-owned catalog into MongoDB | syncs in the inventory of the selected NAPs        |
 | NAP  | loads this NAP's inventory into MongoDB  | syncs in the NDP-owned catalog                     |
 
-The catalog is manufacturers, platforms, location types, device types, tenancy, namespaces, VRFs, roles and
-prefixes; the inventory is locations, rack groups, racks, devices, interfaces, VLANs, IP addresses and cables.
+Which types make up the catalog and the inventory is data: one `OwnershipRule` per type, defined on the NDP. The
+NDP's "Nautobot to MongoDB" run publishes the rules next to the catalog, and a NAP refreshes its copy of them
+before either of its jobs loads anything. The Transfer Ownership job, on the NDP, moves a type to the other role.
 """
 
 import logging
@@ -25,15 +26,23 @@ from contextlib import nullcontext
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse
-from nautobot.apps.jobs import BooleanVar, MultiChoiceVar, register_jobs
+from nautobot.apps.jobs import BooleanVar, DryRunVar, Job, MultiChoiceVar, ObjectVar, register_jobs
+from nautobot.apps.utils import get_route_for_model
 from nautobot_ssot.jobs.base import DataMapping, DataSource, DataTarget
 from pymongo.errors import PyMongoError
 
 from nautobot_ssot_mongo.changelog import changelog_disabled
 from nautobot_ssot_mongo.constants import JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
 from nautobot_ssot_mongo.diff import CustomOrderingDiff, sync_flags
-from nautobot_ssot_mongo.diffsync.adapters import MODELS_BY_OWNER, MONGO_ADAPTERS, NAUTOBOT_ADAPTERS
+from nautobot_ssot_mongo.diffsync.adapters import (
+    MONGO_ADAPTERS,
+    NAUTOBOT_ADAPTERS,
+    MongoNautobotAdapter,
+    owned_model_names,
+)
+from nautobot_ssot_mongo.models import OwnershipRule, model_display_name, ownership_rules_writable
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
+from nautobot_ssot_mongo.ownership import apply_owner_change, apply_rules, publish_rules, pull_rules
 from nautobot_ssot_mongo.roles import ROLE_NAP, ROLE_NDP, get_ndp_instance, get_role, other_role
 from nautobot_ssot_mongo.utils.mongo import (
     MongoSyncClient,
@@ -50,27 +59,10 @@ name = "MongoDB SSoT"  # pylint: disable=invalid-name
 REMOTE_INSTANCES_CACHE_KEY = "nautobot_ssot_mongo.remote_instances"
 REMOTE_INSTANCES_CACHE_TIMEOUT = 60
 
-# DiffSync model name -> (label, Nautobot list view route)
-DATA_MAPPINGS = {
-    "manufacturer": ("Manufacturer", "dcim:manufacturer_list"),
-    "platform": ("Platform", "dcim:platform_list"),
-    "locationtype": ("Location Type", "dcim:locationtype_list"),
-    "devicetype": ("Device Type", "dcim:devicetype_list"),
-    "tenantgroup": ("Tenant Group", "tenancy:tenantgroup_list"),
-    "tenant": ("Tenant", "tenancy:tenant_list"),
-    "namespace": ("Namespace", "ipam:namespace_list"),
-    "vrf": ("VRF", "ipam:vrf_list"),
-    "role": ("Role", "extras:role_list"),
-    "prefix": ("Prefix", "ipam:prefix_list"),
-    "location": ("Location", "dcim:location_list"),
-    "rackgroup": ("Rack Group", "dcim:rackgroup_list"),
-    "rack": ("Rack", "dcim:rack_list"),
-    "device": ("Device", "dcim:device_list"),
-    "interface": ("Interface", "dcim:interface_list"),
-    "vlan": ("VLAN", "ipam:vlan_list"),
-    "ipaddress": ("IP Address", "ipam:ipaddress_list"),
-    "cable": ("Cable", "dcim:cable_list"),
-}
+
+def model_label(model_name):
+    """Return the display name of a DiffSync model's Nautobot model, for example `IP Address`."""
+    return model_display_name(getattr(MongoNautobotAdapter, model_name)._model)  # pylint: disable=protected-access
 
 
 def get_remote_instance_choices():
@@ -120,7 +112,7 @@ class MongoSyncMixin:
             "Nautobot role": role,
             "Nautobot instance": get_nautobot_instance(app_settings),
             "Objects owned by": owner,
-            "Synced objects": ", ".join(DATA_MAPPINGS[model][0] for model in MODELS_BY_OWNER[owner]),
+            "Synced objects": ", ".join(model_label(model) for model in owned_model_names(owner)) or "none enabled",
             "Owner metadata type": METADATA_TYPE_NAME,
             "Tombstone TTL (days)": get_tombstone_ttl_seconds(app_settings) // 86400,
         }
@@ -134,8 +126,10 @@ class MongoSyncMixin:
     def data_mappings(cls):
         """List describing the data mappings involved in this sync."""
         mappings = []
-        for model in MODELS_BY_OWNER[cls.owner_role()]:
-            label, route_name = DATA_MAPPINGS[model]
+        for model in owned_model_names(cls.owner_role()):
+            label = model_label(model)
+            model_class = getattr(MongoNautobotAdapter, model)._model  # pylint: disable=protected-access
+            route_name = get_route_for_model(model_class, "list")
             mappings.append(DataMapping(f"{label} document", None, label, reverse(route_name)))
         return tuple(mappings)
 
@@ -167,7 +161,37 @@ class MongoSyncMixin:
         self.nautobot_instances = list(kwargs.pop("nautobot_instances", None) or [])
         # Only "MongoDB to Nautobot" offers the option; a push never writes Nautobot objects.
         self.record_changelog = bool(kwargs.pop("record_changelog", True))
+        if get_role() == ROLE_NAP:
+            self.refresh_ownership_rules()
         super().run(dryrun=self.dryrun, memory_profiling=self.memory_profiling, *args, **kwargs)
+
+    def refresh_ownership_rules(self):
+        """Make this NAP's ownership rules match the ones the NDP published, before any adapter reads them.
+
+        The rules decide which types each job moves, so they are refreshed even on a dry run. A NAP whose NDP has
+        not published rules yet keeps the rules it has, which are the app defaults on a fresh install.
+        """
+        app_settings = get_app_settings()
+        ndp_instance = get_ndp_instance(app_settings)
+        client = self.get_mongo_client()
+        payloads = pull_rules(client, ndp_instance)
+        if not payloads:
+            self.logger.warning(
+                "NDP instance '%s' has not published ownership rules; using the rules stored on this NAP.",
+                ndp_instance,
+            )
+            return
+        apply_rules(
+            payloads,
+            client,
+            get_nautobot_instance(app_settings),
+            ROLE_NAP,
+            metadata=get_status_metadata(),
+            log=self.logger,
+        )
+
+    def before_sync(self):
+        """Hook run just before the diff is applied; the NDP's push publishes the ownership rules here."""
 
     def execute_sync(self):
         """Perform the CRUD operations that sync `self.diff` into the target, deferring deletions until last.
@@ -179,6 +203,7 @@ class MongoSyncMixin:
             return
         owner = self.owner_role()
         self.logger.info("Performing CRUD operations to sync %s-owned objects into %s.", owner, self.Meta.data_target)
+        self.before_sync()
         if self.record_changelog:
             changelog = nullcontext()
         else:
@@ -295,6 +320,16 @@ class MongoDataTarget(MongoSyncMixin, DataTarget):
         self.source_adapter = self.get_nautobot_adapter()
         self.source_adapter.load()
 
+    def before_sync(self):
+        """Publish the ownership rules from the NDP, so every NAP refreshes them before its next job."""
+        if get_role() == ROLE_NDP:
+            publish_rules(
+                self.target_adapter.client,
+                get_nautobot_instance(),
+                metadata=get_status_metadata(),
+                log=self.logger,
+            )
+
     def load_target_adapter(self):
         """Load this instance's MongoDB partition, first stamping role and version fields on legacy documents."""
         client = self.get_mongo_client()
@@ -305,5 +340,58 @@ class MongoDataTarget(MongoSyncMixin, DataTarget):
         self.target_adapter.load()
 
 
-jobs = [MongoDataSource, MongoDataTarget]
+class TransferOwnership(Job):
+    """Move one content type to the other role, on the NDP."""
+
+    rule = ObjectVar(
+        model=OwnershipRule,
+        label="Ownership rule",
+        description="The type to hand to the other role.",
+    )
+    dryrun = DryRunVar(description="Report what the transfer would do without changing anything.")
+
+    class Meta:  # pylint: disable=too-few-public-methods
+        """Meta data for TransferOwnership."""
+
+        name = "Transfer Ownership"
+        description = (
+            "Hand one federated type to the other role. On the NDP this releases or retires its own copies and "
+            "publishes the new rules; every NAP applies its side when it next runs a sync job. Afterwards, run "
+            "Nautobot to MongoDB on the new owners and MongoDB to Nautobot on the others."
+        )
+        has_sensitive_variables = False
+
+    def run(self, rule, dryrun):  # pylint: disable=arguments-differ
+        """Flip the rule's owner, settle the NDP's side of the move and publish the rules."""
+        app_settings = get_app_settings()
+        role = get_role(app_settings)
+        if role != ROLE_NDP:
+            raise ValueError("Ownership is transferred on the NDP; this instance is a NAP.")
+        new_role = other_role(rule.owner_role)
+        self.logger.info("Transferring %s from the %s to the %s.", rule.content_type_label, rule.owner_role, new_role)
+        if dryrun:
+            self.logger.info(
+                "Dry run: the rule would be updated, the NDP would %s its %s objects and the rules would be published.",
+                "release" if new_role == ROLE_NDP else "retire the documents of",
+                rule.content_type_label,
+            )
+            return
+        with ownership_rules_writable():
+            rule.owner_role = new_role
+            rule.validated_save()
+        client = MongoSyncClient.from_settings(app_settings)
+        client.ensure_indexes(tombstone_ttl_seconds=get_tombstone_ttl_seconds(app_settings))
+        instance = get_nautobot_instance(app_settings)
+        metadata = get_status_metadata()
+        apply_owner_change(rule.content_type, new_role, client, instance, role, metadata=metadata, log=self.logger)
+        publish_rules(client, instance, metadata=metadata, log=self.logger)
+        self.logger.info(
+            "Done. Run Nautobot to MongoDB on every %s instance, then MongoDB to Nautobot on the %s side, to move "
+            "the objects.",
+            new_role,
+            other_role(new_role),
+        )
+
+
+jobs = [MongoDataSource, MongoDataTarget, TransferOwnership]
 register_jobs(*jobs)

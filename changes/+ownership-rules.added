@@ -1,0 +1,1 @@
+Added the `OwnershipRule` model, with UI, REST API and GraphQL, so that which role owns each synced content type, whether it is synced and its sync order are data defined on the NDP; the NDP's "Nautobot to MongoDB" run publishes the rules and every NAP mirrors them before each sync job.

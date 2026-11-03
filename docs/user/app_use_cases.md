@@ -11,8 +11,9 @@ Both jobs live under **Jobs > Jobs > MongoDB SSoT** and accept the standard SSoT
 - **Debug**: log one line per content type as documents are loaded from MongoDB, and record unchanged objects in the sync log.
 - **Record change log** (MongoDB to Nautobot only): on by default. Turn it off for the first pull of a large inventory to skip the change log entry for every written object; see [Running at Scale](../admin/install.md#running-at-scale).
 
-What each job moves depends on the `nautobot_role` setting. The job detail page on the SSoT dashboard lists the
-role, the instance name and the object types involved under *Configuration*.
+What each job moves depends on the `nautobot_role` setting and on the ownership rules (**Apps > MongoDB SSoT >
+Ownership Rules**). The job detail page on the SSoT dashboard lists the role, the instance name and the object
+types involved under *Configuration*.
 
 ## Use-cases and common workflows
 
@@ -52,6 +53,39 @@ NAP that owns it, visible under *Object Metadata* on its detail page.
     Only objects previously synced in from the selected NAPs are reconciled. Locations or devices maintained directly
     on the NDP are never removed by the pull.
 
+### Leave a type out of the sync
+
+On the NDP, open **Apps > MongoDB SSoT > Ownership Rules**, edit the rule of the type and uncheck *Enabled*. The
+next **Nautobot to MongoDB** run on the NDP publishes the rules, and every NAP picks them up at the start of its
+next sync job, so the type stops moving in either direction everywhere. Documents already published stay in
+MongoDB untouched; re-enable the rule to resume. The same page lets you change a type's position in the sync
+order, which must keep every type after the types its objects reference.
+
+!!! note
+    On a NAP the rules are read-only: they are refreshed from the NDP's partition by both sync jobs, even on a dry
+    run, and a change made on a NAP is rejected.
+
+### Change which role owns a type
+
+Ownership is changed with the **Transfer Ownership** job on the NDP, never by editing the rule's owner, because
+the objects of that type have to move between instances. Run the job with *Dry run* checked first; it names the
+type and the direction. Without *Dry run* the job:
+
+1. flips the rule's owner,
+2. settles the NDP's own copies: when the NDP becomes the owner, it removes the owner stamps from the objects it
+   had pulled, which turns them into local objects; when the NDP stops being the owner, it tombstones the documents
+   it had published for that type,
+3. publishes the rules to MongoDB.
+
+Every NAP settles its side when it next runs either sync job: it removes the NDP's stamps from its copies when
+the NAPs become the owners, or tombstones the documents it had published when the NDP becomes the owner. The
+objects then move through the ordinary runs: **Nautobot to MongoDB** on the new owners, then **MongoDB to
+Nautobot** on the other side, where the existing copies are adopted and stamped rather than duplicated.
+
+!!! warning
+    Moving a catalog type to the NAPs means every NAP publishes its copy of the same objects, and the NDP adopts
+    whichever document it reads last for a given key. Make sure the copies agree, or keep such types on the NDP.
+
 ### Retire an object
 
 Delete the object on its owner and run **Nautobot to MongoDB** there: its document becomes a tombstone. The next
@@ -61,9 +95,9 @@ tombstone after `tombstone_ttl_days`; re-creating the object before then revives
 ### Add a new NAP
 
 Install the app on the new instance with `nautobot_role` set to `NAP`, a unique `nautobot_instance` and the
-`ndp_instance` of the NDP. Run **MongoDB to Nautobot** to import the catalog, then **Nautobot to MongoDB** to
-publish the NAP's inventory. No change is needed on the NDP: the new partition appears in the *Nautobot instances*
-field of its **MongoDB to Nautobot** job.
+`ndp_instance` of the NDP. Run **MongoDB to Nautobot** to import the catalog (the job first mirrors the ownership
+rules the NDP published), then **Nautobot to MongoDB** to publish the NAP's inventory. No change is needed on the
+NDP: the new partition appears in the *Nautobot instances* field of its **MongoDB to Nautobot** job.
 
 ## Screenshots
 

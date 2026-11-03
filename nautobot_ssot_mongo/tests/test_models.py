@@ -8,8 +8,10 @@ from django.contrib.contenttypes.models import ContentType
 from nautobot.apps.testing import TestCase
 from nautobot.extras.models.metadata import MetadataType
 
+from nautobot_ssot_mongo.constants import DEFAULT_OWNERSHIP_RULES
 from nautobot_ssot_mongo.diffsync import adapters
 from nautobot_ssot_mongo.diffsync.models import catalog, inventory
+from nautobot_ssot_mongo.models import OwnershipRule
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
 
 migration = importlib.import_module("nautobot_ssot_mongo.migrations.0001_ssot_mongo_owner_metadatatype")
@@ -51,9 +53,22 @@ class ModelPairContractTestCase(TestCase):
                 self.assertIs(getattr(adapters.MongoNautobotAdapter, model_name)._modelname, model_name)
                 self.assertIs(getattr(adapters.MongoRemoteAdapter, model_name)._modelname, model_name)
 
-    def test_ipaddress_is_owned_by_the_nap(self):
-        self.assertIn("ipaddress", adapters.NAP_MODELS)
-        self.assertNotIn("ipaddress", adapters.NDP_MODELS)
+    def test_default_rules_cover_exactly_the_synced_models(self):
+        defaults = {f"{app_label}.{model}" for app_label, model, _ in DEFAULT_OWNERSHIP_RULES}
+
+        self.assertEqual(defaults, set(adapters.MODEL_NAMES_BY_CONTENT_TYPE))
+        self.assertEqual(defaults, {_label(local._model) for local in _local_models()})
+        self.assertEqual(
+            adapters.TOP_LEVEL,
+            [adapters.MODEL_NAMES_BY_CONTENT_TYPE[f"{app}.{model}"] for app, model, _ in DEFAULT_OWNERSHIP_RULES],
+        )
+
+    def test_ipaddress_is_owned_by_the_nap_by_default(self):
+        rule = OwnershipRule.objects.get(content_type__app_label="ipam", content_type__model="ipaddress")
+
+        self.assertEqual(rule.owner_role, "NAP")
+        self.assertIn("ipaddress", adapters.owned_model_names("NAP"))
+        self.assertNotIn("ipaddress", adapters.owned_model_names("NDP"))
 
 
 class OwnerMetadataTypeTestCase(TestCase):
