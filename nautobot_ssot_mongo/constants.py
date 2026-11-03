@@ -40,3 +40,9 @@ DEFAULT_OWNERSHIP_RULES = (
     ("ipam", "ipaddress", "SPOKE"),
     ("dcim", "cable", "SPOKE"),
 )
+
+# The content type of the heartbeat document every instance writes in its own partition after a successful sync.
+INSTANCE_HEARTBEAT_CONTENT_TYPE = "nautobot_ssot_mongo.federatedinstance"
+
+# Documents the app writes about itself rather than about a synced Nautobot object.
+CONTROL_CONTENT_TYPES = (OWNERSHIP_RULES_CONTENT_TYPE, INSTANCE_HEARTBEAT_CONTENT_TYPE)

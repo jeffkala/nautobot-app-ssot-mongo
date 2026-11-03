@@ -4,22 +4,16 @@ from unittest.mock import MagicMock, patch
 
 import mongomock
 from django.conf import settings
-from django.core.cache import cache
 from django.test import override_settings
 from nautobot.apps.testing import TestCase
 from nautobot.extras.context_managers import JobChangeContext, change_logging
 from nautobot.extras.signals import change_context_state
-from pymongo.errors import PyMongoError
 
-from nautobot_ssot_mongo.constants import JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
+from nautobot_ssot_mongo.constants import INSTANCE_HEARTBEAT_CONTENT_TYPE, JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
 from nautobot_ssot_mongo.diff import CustomOrderingDiff
 from nautobot_ssot_mongo.diffsync.adapters import owned_model_names
-from nautobot_ssot_mongo.jobs import (
-    REMOTE_INSTANCES_CACHE_KEY,
-    MongoDataSource,
-    MongoDataTarget,
-    get_remote_instance_choices,
-)
+from nautobot_ssot_mongo.jobs import MongoDataSource, MongoDataTarget, get_remote_instance_choices
+from nautobot_ssot_mongo.models import FederatedInstance
 from nautobot_ssot_mongo.utils.mongo import MongoSyncClient
 
 
@@ -52,8 +46,8 @@ class RoleDrivenJobTestCase(TestCase):
         patcher = patch.object(MongoSyncClient, "from_settings", return_value=self.client)
         patcher.start()
         self.addCleanup(patcher.stop)
-        cache.delete(REMOTE_INSTANCES_CACHE_KEY)
-        self.addCleanup(cache.delete, REMOTE_INSTANCES_CACHE_KEY)
+        for name, role in (("HUB", "HUB"), ("SPOKE-Austin", "SPOKE"), ("SPOKE-Boston", "SPOKE")):
+            FederatedInstance(name=name, role=role).validated_save()
 
     @staticmethod
     def _job(job_class):
@@ -110,29 +104,20 @@ class RoleDrivenJobTestCase(TestCase):
         self.assertEqual(job.target_adapter.nautobot_instances, ["SPOKE-Boston"])
 
     @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
-    def test_remote_instance_choices_are_the_other_roles_partitions(self):
+    def test_remote_instance_choices_are_the_registered_spokes(self):
         self.assertEqual(
             get_remote_instance_choices(), [("SPOKE-Austin", "SPOKE-Austin"), ("SPOKE-Boston", "SPOKE-Boston")]
         )
 
     @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Austin"))
-    def test_remote_instance_choices_on_a_spoke_list_the_hub(self):
-        self.assertEqual(get_remote_instance_choices(), [("HUB", "HUB"), ("SPOKE-Boston", "SPOKE-Boston")])
+    def test_remote_instance_choices_on_a_spoke_are_the_registered_hub(self):
+        self.assertEqual(get_remote_instance_choices(), [("HUB", "HUB")])
 
     @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
-    def test_remote_instance_choices_are_served_from_the_cache_for_a_while(self):
-        first = get_remote_instance_choices()
+    def test_remote_instance_choices_come_from_the_registry_not_the_collection(self):
         self.client.upsert("SPOKE-Dallas", "dcim.location", "Dallas__None", {"name": "Dallas"})
 
-        self.assertEqual(get_remote_instance_choices(), first)
-        cache.delete(REMOTE_INSTANCES_CACHE_KEY)
-        self.assertIn(("SPOKE-Dallas", "SPOKE-Dallas"), get_remote_instance_choices())
-
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
-    def test_unreachable_mongodb_yields_no_choices_and_caches_nothing(self):
-        with patch.object(MongoSyncClient, "instances", side_effect=PyMongoError("down")):
-            self.assertEqual(get_remote_instance_choices(), [])
-        self.assertIsNone(cache.get(REMOTE_INSTANCES_CACHE_KEY))
+        self.assertNotIn(("SPOKE-Dallas", "SPOKE-Dallas"), get_remote_instance_choices())
 
     @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
     def test_hub_target_job_loads_hub_owned_objects_under_its_own_partition(self):
@@ -193,6 +178,7 @@ class ExecuteSyncTestCase(TestCase):
 
     def setUp(self):
         super().setUp()
+        self.client = MongoSyncClient(client=mongomock.MongoClient(), database="testdb", collection="objects")
         self.job = MongoDataSource()
         self.job.sync = None
         self.job.source_adapter = MagicMock()
@@ -201,6 +187,7 @@ class ExecuteSyncTestCase(TestCase):
         self.job.record_changelog = True
         self.job.logger.info = MagicMock()
         self.job.logger.warning = MagicMock()
+        self.job._mongo_client = self.client  # pylint: disable=protected-access
 
     def test_sync_uses_the_custom_diff_and_the_job_flags(self):
         self.job.execute_sync()
@@ -216,6 +203,19 @@ class ExecuteSyncTestCase(TestCase):
 
         self.job.source_adapter.sync_to.assert_not_called()
         self.job.logger.warning.assert_called_once()
+        self.assertFalse(FederatedInstance.objects.exists())
+
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Dev"))
+    def test_sync_ends_with_a_heartbeat_and_a_registry_refresh(self):
+        self.job.execute_sync()
+
+        heartbeat = self.client.get("SPOKE-Dev", INSTANCE_HEARTBEAT_CONTENT_TYPE, "SPOKE-Dev")
+        self.assertIsNotNone(heartbeat["data"]["last_pull"])
+        self.assertIsNone(heartbeat["data"]["last_publish"])
+        instance = FederatedInstance.objects.get(name="SPOKE-Dev")
+        self.assertEqual(instance.role, "SPOKE")
+        self.assertIsNotNone(instance.last_pull)
+        self.assertEqual(instance.last_seen, instance.last_pull)
 
     def _sync_change_context(self):
         seen = []

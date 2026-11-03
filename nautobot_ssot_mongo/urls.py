@@ -9,6 +9,7 @@ from nautobot_ssot_mongo import views
 
 app_name = "nautobot_ssot_mongo"
 router = NautobotUIViewSetRouter()
+router.register("federated-instances", views.FederatedInstanceUIViewSet)
 router.register("ownership-rules", views.OwnershipRuleUIViewSet)
 
 urlpatterns = [

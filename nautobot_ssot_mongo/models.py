@@ -4,6 +4,9 @@ The app federates Nautobot objects by content type: every type the app can sync 
 that assignment is data, an `OwnershipRule` per type. The rules are defined on the hub, published to MongoDB by its
 "Nautobot to MongoDB" job and refreshed on every spoke before each of its sync jobs, so every instance syncs the same
 types in the same order.
+
+The members of the federation are data too: a `FederatedInstance` per instance, kept in step with the heartbeat
+document each instance writes to MongoDB at the end of every successful sync job.
 """
 
 from contextlib import contextmanager
@@ -15,9 +18,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from nautobot.apps.constants import CHARFIELD_MAX_LENGTH
 from nautobot.apps.models import OrganizationalModel, extras_features
 
-from nautobot_ssot_mongo.choices import OwnerRoleChoices
+from nautobot_ssot_mongo.choices import RoleChoices
 from nautobot_ssot_mongo.constants import DEFAULT_OWNERSHIP_RULES
 from nautobot_ssot_mongo.roles import ROLE_SPOKE, get_role
 
@@ -59,7 +63,7 @@ class OwnershipRule(OrganizationalModel):  # pylint: disable=too-many-ancestors
     )
     owner_role = models.CharField(
         max_length=5,
-        choices=OwnerRoleChoices,
+        choices=RoleChoices,
         help_text=(
             "Role whose instances own the objects of this type and publish them to MongoDB. "
             "Instances of the other role sync them in and treat them as read-only."
@@ -91,7 +95,7 @@ class OwnershipRule(OrganizationalModel):  # pylint: disable=too-many-ancestors
 
     def get_owner_role_class(self) -> str:
         """Return the Bootstrap label class the tables colour the owner with."""
-        return OwnerRoleChoices.CSS_CLASSES[self.owner_role]
+        return RoleChoices.CSS_CLASSES[self.owner_role]
 
     @property
     def content_type_label(self) -> str:
@@ -130,3 +134,64 @@ class OwnershipRule(OrganizationalModel):  # pylint: disable=too-many-ancestors
                         )
                     }
                 )
+
+
+@extras_features("graphql")
+class FederatedInstance(OrganizationalModel):  # pylint: disable=too-many-ancestors
+    """A Nautobot instance taking part in the federation, as last reported by its own sync jobs.
+
+    Rows are not created by hand. Every instance writes a heartbeat document to MongoDB at the end of each successful
+    sync job, and every sync job refreshes this registry from the heartbeats it finds, so each instance holds the same
+    view of the federation: who is in it, when each member last published or pulled, which versions it runs and how
+    many documents it has published per type.
+    """
+
+    name = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH,
+        unique=True,
+        help_text="The instance's `nautobot_instance` setting, which names its partition in MongoDB.",
+    )
+    role = models.CharField(max_length=5, choices=RoleChoices, help_text="The instance's `nautobot_role` setting.")
+    last_publish = models.DateTimeField(
+        null=True, blank=True, help_text="When the instance last finished a Nautobot to MongoDB run."
+    )
+    last_pull = models.DateTimeField(
+        null=True, blank=True, help_text="When the instance last finished a MongoDB to Nautobot run."
+    )
+    last_seen = models.DateTimeField(null=True, blank=True, help_text="When the instance last wrote its heartbeat.")
+    nautobot_version = models.CharField(
+        max_length=CHARFIELD_MAX_LENGTH, blank=True, help_text="The Nautobot version the instance last reported."
+    )
+    app_versions = models.JSONField(
+        default=dict, blank=True, help_text="Versions of the Nautobot apps installed on the instance, by package."
+    )
+    document_counts = models.JSONField(
+        default=dict, blank=True, help_text="Live documents the instance has published to MongoDB, per content type."
+    )
+
+    is_dynamic_group_associable_model = False
+    natural_key_field_names = ["name"]
+
+    class Meta:
+        """Meta options for FederatedInstance."""
+
+        ordering = ["name"]
+        verbose_name = "federated instance"
+
+    def __str__(self):
+        """Return the instance name."""
+        return self.name
+
+    def get_role_class(self) -> str:
+        """Return the Bootstrap label class the tables colour the role with."""
+        return RoleChoices.CSS_CLASSES[self.role]
+
+    @property
+    def app_version(self) -> str:
+        """Return the version of this app the instance last reported, or an empty string."""
+        return self.app_versions.get(self._meta.app_label, "")
+
+    @property
+    def document_total(self) -> int:
+        """Return how many live documents the instance has published in total."""
+        return sum(self.document_counts.values())

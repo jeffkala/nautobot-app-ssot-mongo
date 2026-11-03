@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pymongo import ASCENDING, MongoClient
 
 HUB_INSTANCE = "HUB"
+# The content type of the heartbeat document each instance writes after a sync (see `nautobot_ssot_mongo.registry`).
+HEARTBEAT_CONTENT_TYPE = "nautobot_ssot_mongo.federatedinstance"
 TOMBSTONE_TTL_SECONDS = 30 * 86400
 
 # (content_type, identifier field names, list of data payloads): the catalog owned by the hub
@@ -491,6 +493,41 @@ def seed(collection, nautobot_instance, role, sample_data, now):
         print(f"{nautobot_instance:<12} {role:<4} {content_type:<18} {count:>3} document(s)")
 
 
+def heartbeat(collection, nautobot_instance, role, now):
+    """Write the heartbeat a "Nautobot to MongoDB" run would leave, so the registry lists the sample instance."""
+    metadata = status_metadata(role)
+    counts = {
+        row["_id"]: row["count"]
+        for row in collection.aggregate(
+            [
+                {
+                    "$match": {
+                        "nautobot_instance": nautobot_instance,
+                        "deleted": {"$ne": True},
+                        "content_type": {"$not": {"$regex": "^nautobot_ssot_mongo\\."}},
+                    }
+                },
+                {"$group": {"_id": "$content_type", "count": {"$sum": 1}}},
+            ]
+        )
+    }
+    data = {
+        "name": nautobot_instance,
+        "role": role,
+        "last_publish": now,
+        "last_pull": None,
+        "nautobot_version": metadata.get("nautobot_version", ""),
+        "app_versions": metadata.get("nautobot_apps", {}),
+        "document_counts": counts,
+    }
+    collection.update_one(
+        {"nautobot_instance": nautobot_instance, "content_type": HEARTBEAT_CONTENT_TYPE, "key": nautobot_instance},
+        {"$set": {"data": data, "deleted": False, "updated_at": now, **metadata}, "$unset": {"deleted_at": ""}},
+        upsert=True,
+    )
+    print(f"{nautobot_instance:<12} {role:<4} {'heartbeat':<18} {sum(counts.values()):>3} document(s) published")
+
+
 def main(argv=None):
     """Seed the collection with the hub's global data and each sample spoke's local data."""
     args = parse_args(argv)
@@ -517,8 +554,10 @@ def main(argv=None):
 
     now = datetime.now(timezone.utc)
     seed(collection, args.hub_instance, "HUB", GLOBAL_SAMPLE_DATA, now)
+    heartbeat(collection, args.hub_instance, "HUB", now)
     for spoke_instance, sample_data in LOCAL_SAMPLE_DATA.items():
         seed(collection, spoke_instance, "SPOKE", sample_data, now)
+        heartbeat(collection, spoke_instance, "SPOKE", now)
     return 0
 
 

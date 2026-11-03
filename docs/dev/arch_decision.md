@@ -45,6 +45,16 @@ spoke names. A new spoke therefore appears on the hub as soon as it publishes, a
 where the set of instances has to be maintained. A spoke, in turn, reads hub-owned objects from the single partition
 named by `hub_instance`. Documents written before the role field existed carry no role and still count as spokes.
 
+## The federation is described by heartbeats, not by configuration
+
+Which instances exist, what they run and when they last synced is recorded as data that every member can see: a
+heartbeat document per instance in MongoDB, written by the instance itself at the end of each successful sync job,
+and a `FederatedInstance` row per heartbeat on every instance, refreshed by every sync job. No instance is configured
+with a list of the others, and the registry is never edited by hand, so it cannot drift from what the jobs actually
+did. The job's instance picker reads the registry rather than scanning the collection on every form render; a pull
+with no selection still reads every spoke partition, so a spoke that published a minute ago is never missed. The
+same heartbeats are the basis for staleness alerts and metrics later.
+
 ## Pulls reconcile owner-stamped objects instead of deleting everything unowned
 
 Every object synced in is stamped with an `ObjectMetadata` of the **SSoT MongoDB Owner** type naming the publishing

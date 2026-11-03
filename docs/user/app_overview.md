@@ -73,6 +73,19 @@ A pull only reconciles the objects it synced in before (those stamped with an ow
 objects an instance created by hand are never deleted by a sync. When a pulled object already exists locally without
 an owner, it is adopted: updated in place and stamped, rather than failing on a duplicate.
 
+### Instance registry
+
+Every member of the federation has a row under **Apps > MongoDB SSoT > Federated Instances**: its name and role,
+when it last finished a **Nautobot to MongoDB** and a **MongoDB to Nautobot** run, the Nautobot and app versions it
+runs, and how many live documents it has published per object type. Nobody creates these rows. At the end of every
+successful sync job an instance writes a *heartbeat* document to its own partition in MongoDB, and every sync job, at
+its start and at its end, refreshes the registry from all the heartbeats it finds, so each instance holds the same
+view of the federation. An instance whose partition is purged from the collection disappears from the registry on
+the next refresh.
+
+The registry is read-only in the UI and the REST API, and it also feeds the *Nautobot instances* picker on the
+**MongoDB to Nautobot** job.
+
 Deletions are always applied last and in reverse dependency order, so that, for example, a cable is removed before
 its interfaces and a device before its location. On the MongoDB side a deletion is a *soft* delete: the document
 becomes a tombstone (`deleted: true`) that consumers skip, that a re-created object revives, and that MongoDB expires
@@ -130,4 +143,7 @@ adapter" is the `SpokeMongoAdapter` / `SpokeNautobotAdapter` pair; each pair onl
   synced models. Do not rename it or detach content types from it; the pull jobs rely on it.
 - Model: `OwnershipRule`, one per synced content type, with list, detail and edit views, a REST API endpoint
   (`/api/plugins/ssot-mongo/ownership-rules/`) and a GraphQL type. The data migration seeds the default rules.
+- Model: `FederatedInstance`, one per instance in the federation, maintained by the sync jobs, with list and detail
+  views, a read-only REST API endpoint (`/api/plugins/ssot-mongo/federated-instances/`) and a GraphQL type.
+- Home page: a **MongoDB SSoT** panel with the counts of federated instances and ownership rules.
 - No custom fields or relationships are added by this app.
