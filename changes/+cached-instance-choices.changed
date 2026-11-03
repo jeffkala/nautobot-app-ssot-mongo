@@ -1,0 +1,1 @@
+Changed the `Nautobot instances` choices on the `MongoDB to Nautobot` form to be cached for 60 seconds instead of queried from MongoDB on every form render.

@@ -1,0 +1,1 @@
+Raised the minimum Nautobot version to 3.2.0 and moved the cable sync to the cable termination model introduced in Nautobot 3.2.

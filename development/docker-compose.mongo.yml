@@ -1,0 +1,44 @@
+---
+# Development-only MongoDB. Authentication is disabled; the Nautobot services are pointed at it through
+# NAUTOBOT_SSOT_MONGO_URI. To use an external MongoDB instead, drop this file from `compose_files` in invoke.yml
+# and set NAUTOBOT_SSOT_MONGO_URI (plus NAUTOBOT_SSOT_MONGO_USERNAME/PASSWORD in creds.env) yourself.
+x-mongo-env: &mongo-env
+  environment:
+    - "NAUTOBOT_SSOT_MONGO_URI=mongodb://mongo:27017/"
+
+services:
+  nautobot:
+    <<: *mongo-env
+    depends_on:
+      mongo:
+        condition: "service_healthy"
+  worker:
+    <<: *mongo-env
+    depends_on:
+      mongo:
+        condition: "service_healthy"
+  beat:
+    <<: *mongo-env
+  mongo:
+    image: "mongo:8"
+    # To reach MongoDB from the host (for example with Compass or the seed script), uncomment:
+    ports:
+      - "27017:27017"
+    environment:
+      # MongoDB 8 refuses to start on Linux kernels 6.19+ (Docker Desktop ships 7.x) without this glibc tunable.
+      # See https://jira.mongodb.org/browse/SERVER-121912
+      - "GLIBC_TUNABLES=glibc.pthread.rseq=1"
+    command:
+      - "mongod"
+      - "--bind_ip_all"
+    volumes:
+      - "mongo_data:/data/db"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: "10s"
+      timeout: "5s"
+      retries: 10
+      start_period: "20s"
+
+volumes:
+  mongo_data: {}

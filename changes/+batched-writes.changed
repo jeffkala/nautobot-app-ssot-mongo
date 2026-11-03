@@ -1,0 +1,1 @@
+Changed the `Nautobot to MongoDB` job to write creates, updates and deletes to MongoDB in batches of 100 operations instead of one round trip per object; a write the server rejects now fails the job.

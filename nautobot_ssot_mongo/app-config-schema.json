@@ -1,0 +1,69 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/networktocode-llc/nautobot-app-ssot-mongo/develop/nautobot_ssot_mongo/app-config-schema.json",
+    "$comment": "JSON schema for the nautobot_ssot_mongo PLUGINS_CONFIG entry.",
+    "type": "object",
+    "properties": {
+        "mongo_uri": {
+            "type": "string",
+            "default": "mongodb://localhost:27017/",
+            "description": "MongoDB connection URI."
+        },
+        "mongo_database": {
+            "type": "string",
+            "default": "nautobot_sync",
+            "description": "Database holding the synced documents."
+        },
+        "mongo_collection": {
+            "type": "string",
+            "default": "objects",
+            "description": "Collection holding the synced documents."
+        },
+        "mongo_username": {
+            "type": "string",
+            "default": "",
+            "description": "Username used to authenticate; leave empty if the URI carries credentials or auth is not enforced."
+        },
+        "mongo_password": {
+            "type": "string",
+            "default": "",
+            "description": "Password used with mongo_username."
+        },
+        "mongo_auth_source": {
+            "type": "string",
+            "default": "admin",
+            "description": "Authentication database used with mongo_username/mongo_password."
+        },
+        "mongo_timeout_ms": {
+            "type": "integer",
+            "default": 5000,
+            "description": "Server selection timeout in milliseconds."
+        },
+        "nautobot_role": {
+            "type": "string",
+            "enum": [
+                "NDP",
+                "NAP"
+            ],
+            "default": "NDP",
+            "description": "Role of this Nautobot instance. The NDP (Nautobot Data Platform) is the federated instance: it owns and publishes global reference data and syncs in the local data of every NAP. A NAP (Nautobot Automation Platform) owns and publishes its local data (locations, devices) and mirrors the NDP's global data."
+        },
+        "nautobot_instance": {
+            "type": "string",
+            "default": "NDP",
+            "description": "Value stored in each document's nautobot_instance field; this instance only writes documents carrying this value."
+        },
+        "ndp_instance": {
+            "type": "string",
+            "default": "NDP",
+            "description": "nautobot_instance value of the NDP. Only used by a NAP, which reads global objects from this partition. Must differ from nautobot_instance on a NAP."
+        },
+        "tombstone_ttl_days": {
+            "type": "integer",
+            "default": 30,
+            "minimum": 0,
+            "description": "Days a soft-deleted (tombstone) document is kept before MongoDB expires it through a TTL index. 0 keeps tombstones forever."
+        }
+    },
+    "additionalProperties": false
+}

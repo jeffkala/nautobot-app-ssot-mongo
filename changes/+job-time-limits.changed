@@ -1,0 +1,1 @@
+Changed the two sync jobs to default to a 60 minute soft and 65 minute hard Celery time limit, overridable per job.

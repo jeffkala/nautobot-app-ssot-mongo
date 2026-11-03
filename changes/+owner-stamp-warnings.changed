@@ -1,0 +1,1 @@
+Changed the warnings about a missing or misconfigured `SSoT MongoDB Owner` metadata type to appear in the job result instead of only the worker log.

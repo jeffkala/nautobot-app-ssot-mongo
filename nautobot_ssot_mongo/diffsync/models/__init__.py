@@ -1,0 +1,91 @@
+"""DiffSync models for nautobot_ssot_mongo.
+
+Each synced object type has two DiffSync models that share identifiers and attributes: a Nautobot-side model
+(`*SSoTModel`) and a MongoDB-side model (`Remote*SSoTModel`). The catalog models are owned by the NDP, the
+inventory models by each NAP (see `nautobot_ssot_mongo.roles`).
+"""
+
+from nautobot_ssot_mongo.diffsync.models.catalog import (
+    DeviceTypeSSoTModel,
+    LocationTypeSSoTModel,
+    ManufacturerSSoTModel,
+    NamespaceSSoTModel,
+    PlatformSSoTModel,
+    PrefixSSoTModel,
+    RemoteDeviceTypeSSoTModel,
+    RemoteLocationTypeSSoTModel,
+    RemoteManufacturerSSoTModel,
+    RemoteNamespaceSSoTModel,
+    RemotePlatformSSoTModel,
+    RemotePrefixSSoTModel,
+    RemoteRoleSSoTModel,
+    RemoteTenantGroupSSoTModel,
+    RemoteTenantSSoTModel,
+    RemoteVRFSSoTModel,
+    RoleSSoTModel,
+    TenantGroupSSoTModel,
+    TenantSSoTModel,
+    VRFSSoTModel,
+)
+from nautobot_ssot_mongo.diffsync.models.inventory import (
+    CableSSoTModel,
+    DeviceSSoTModel,
+    InterfaceSSoTModel,
+    IPAddressSSoTModel,
+    LocationSSoTModel,
+    RackGroupSSoTModel,
+    RackSSoTModel,
+    RemoteCableSSoTModel,
+    RemoteDeviceSSoTModel,
+    RemoteInterfaceSSoTModel,
+    RemoteIPAddressSSoTModel,
+    RemoteLocationSSoTModel,
+    RemoteRackGroupSSoTModel,
+    RemoteRackSSoTModel,
+    RemoteVLANSSoTModel,
+    VLANSSoTModel,
+)
+from nautobot_ssot_mongo.diffsync.models.mixins import LocalOwnerMixin, MongoRemoteMixin
+
+__all__ = [
+    "LocalOwnerMixin",
+    "MongoRemoteMixin",
+    # catalog
+    "ManufacturerSSoTModel",
+    "RemoteManufacturerSSoTModel",
+    "PlatformSSoTModel",
+    "RemotePlatformSSoTModel",
+    "LocationTypeSSoTModel",
+    "RemoteLocationTypeSSoTModel",
+    "DeviceTypeSSoTModel",
+    "RemoteDeviceTypeSSoTModel",
+    "TenantGroupSSoTModel",
+    "RemoteTenantGroupSSoTModel",
+    "TenantSSoTModel",
+    "RemoteTenantSSoTModel",
+    "NamespaceSSoTModel",
+    "RemoteNamespaceSSoTModel",
+    "VRFSSoTModel",
+    "RemoteVRFSSoTModel",
+    "RoleSSoTModel",
+    "RemoteRoleSSoTModel",
+    "PrefixSSoTModel",
+    "RemotePrefixSSoTModel",
+    # inventory
+    "LocationSSoTModel",
+    "RemoteLocationSSoTModel",
+    "RackGroupSSoTModel",
+    "RemoteRackGroupSSoTModel",
+    "RackSSoTModel",
+    "RemoteRackSSoTModel",
+    "DeviceSSoTModel",
+    "RemoteDeviceSSoTModel",
+    "InterfaceSSoTModel",
+    "RemoteInterfaceSSoTModel",
+    "VLANSSoTModel",
+    "RemoteVLANSSoTModel",
+    "IPAddressSSoTModel",
+    "RemoteIPAddressSSoTModel",
+    "CableSSoTModel",
+    "RemoteCableSSoTModel",
+]

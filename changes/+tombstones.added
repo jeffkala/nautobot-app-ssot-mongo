@@ -1,0 +1,1 @@
+Added soft deletes: a removed object becomes a tombstone document that a re-created object revives, and the new `tombstone_ttl_days` setting (default 30) expires tombstones through a MongoDB TTL index.

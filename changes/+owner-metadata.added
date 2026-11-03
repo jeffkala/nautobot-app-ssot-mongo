@@ -1,0 +1,1 @@
+Added the "SSoT MongoDB Owner" metadata type; every object synced in from MongoDB is stamped with the instance that published it, and an object that already exists locally is adopted instead of failing on a duplicate.

@@ -1,0 +1,1 @@
+Fixed the `MongoDB to Nautobot` job deleting a parent location before its children, which failed with a protected-object error; deletes now run deepest location first at any depth.

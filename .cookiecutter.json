@@ -1,0 +1,34 @@
+{
+    "cookiecutter": {
+        "codeowner_github_usernames": "jeffkala",
+        "full_name": "Network to Code, LLC",
+        "email": "info@networktocode.com",
+        "github_org": "networktocode-llc",
+        "system_of_record": "mongo",
+        "system_of_record_camel": "Mongo",
+        "system_of_record_slug": "mongo",
+        "model_class_name": "None",
+        "direction_of_sync": "From Nautobot",
+        "app_name": "nautobot_ssot_mongo",
+        "verbose_name": "Nautobot Ssot Mongo",
+        "app_slug": "nautobot-ssot-mongo",
+        "project_slug": "nautobot-app-ssot-mongo",
+        "repo_url": "https://github.com/networktocode-llc/nautobot-app-ssot-mongo",
+        "base_url": "ssot-mongo",
+        "camel_name": "NautobotSsotMongo",
+        "project_short_description": "Nautobot Ssot Mongo",
+        "open_source_license": "Not open source",
+        "docs_base_url": "https://docs.nautobot.com",
+        "docs_app_url": "https://docs.nautobot.com/projects/nautobot-ssot-mongo/en/latest",
+        "__commercial": false,
+        "_extensions": [
+            "local_extensions.camel_case_to_kebab",
+            "local_extensions.camel_case_to_words",
+            "local_extensions.NautobotVersions"
+        ],
+        "_template": "/private/tmp/claude-501/-Users-jeffkala-Documents-Non-Client-GitRepos-nautobot-app-ssot-mongo/ea67c6b8-a55d-4554-b1ce-be5bcb6ad837/scratchpad/cookie/cookiecutter-nautobot-app",
+        "_output_dir": "/Users/jeffkala/Documents/Non-Client-GitRepos",
+        "_repo_dir": "/private/tmp/claude-501/-Users-jeffkala-Documents-Non-Client-GitRepos-nautobot-app-ssot-mongo/ea67c6b8-a55d-4554-b1ce-be5bcb6ad837/scratchpad/cookie/cookiecutter-nautobot-app/nautobot-app-ssot",
+        "_checkout": null
+    }
+}

@@ -1,0 +1,1 @@
+Changed the sync jobs to write unchanged objects to the SSoT sync log only when the job's debug option is on.

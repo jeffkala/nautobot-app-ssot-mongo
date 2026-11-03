@@ -1,0 +1,1 @@
+Added the `nautobot_role` setting (`NDP` or `NAP`) and the `ndp_instance` setting. The NDP (Nautobot Data Platform) publishes the global reference data and syncs in the locations and devices of every NAP; a NAP (Nautobot Automation Platform) publishes its locations and devices and mirrors the NDP's reference data.

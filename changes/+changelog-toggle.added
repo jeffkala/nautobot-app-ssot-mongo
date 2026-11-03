@@ -1,0 +1,1 @@
+Added a `Record change log` option to the `MongoDB to Nautobot` job; turning it off skips the change log entry for every object the sync writes and the post-sync processing of those entries, which shortens the first pull of a large inventory.

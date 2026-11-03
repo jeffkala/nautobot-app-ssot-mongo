@@ -1,0 +1,1 @@
+Fixed creation failures when a MongoDB document referencing a parent (`parent__name`) sorted before the parent's document, by loading parents first.

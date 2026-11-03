@@ -1,0 +1,1 @@
+Added a second Docker Compose stack playing the NDP role (`invoke -f invoke.ndp.yml start`), Playwright as a development dependency, and an `invoke e2e` task that drives the full NDP/NAP loop through both instances with a visible browser.

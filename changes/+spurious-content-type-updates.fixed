@@ -1,0 +1,1 @@
+Fixed roles and location types reporting an update on every sync when their content types came back from the database in a different order.

@@ -1,0 +1,1 @@
+Added role and version fields to every document and a guard that refuses to sync in documents published by an incompatible major version of Nautobot, `nautobot-ssot` or this app.
