@@ -10,7 +10,7 @@ from nautobot.dcim.models import Manufacturer
 from nautobot.extras.models.metadata import MetadataType, ObjectMetadata
 
 from nautobot_ssot_mongo.diff import CustomOrderingDiff
-from nautobot_ssot_mongo.diffsync.adapters import MongoNautobotAdapter, MongoRemoteAdapter, NDPMongoAdapter
+from nautobot_ssot_mongo.diffsync.adapters import HubMongoAdapter, MongoNautobotAdapter, MongoRemoteAdapter
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME, job_logger, stamp_owner
 from nautobot_ssot_mongo.utils.mongo import MongoSyncClient
 
@@ -32,12 +32,12 @@ def _stamp(obj, owner, transferred=True):
     entry.validated_save()
 
 
-def _mongo_adapter(instance="NDP", read_instances=None):
+def _mongo_adapter(instance="HUB", read_instances=None):
     client = MongoSyncClient(client=mongomock.MongoClient(), database="testdb", collection="objects")
     client.ensure_indexes()
     job = MagicMock()
     job.debug = False
-    return NDPMongoAdapter(job=job, sync=None, client=client, nautobot_instance=instance, read_instances=read_instances)
+    return HubMongoAdapter(job=job, sync=None, client=client, nautobot_instance=instance, read_instances=read_instances)
 
 
 def _nautobot_adapter(nautobot_instances=None):
@@ -54,18 +54,18 @@ class StampOwnerTestCase(TestCase):
     def test_stamp_creates_metadata(self):
         cisco = Manufacturer.objects.create(name="Cisco")
 
-        stamp_owner(cisco, "NDP")
+        stamp_owner(cisco, "HUB")
 
-        self.assertEqual(_owner_for(cisco), {"owner": "NDP", "ownership_transferred": True})
+        self.assertEqual(_owner_for(cisco), {"owner": "HUB", "ownership_transferred": True})
 
     def test_stamp_updates_existing_owner_and_is_idempotent(self):
         cisco = Manufacturer.objects.create(name="Cisco")
-        _stamp(cisco, "NAP-Austin", transferred=False)
+        _stamp(cisco, "SPOKE-Austin", transferred=False)
 
-        stamp_owner(cisco, "NDP")
-        stamp_owner(cisco, "NDP")
+        stamp_owner(cisco, "HUB")
+        stamp_owner(cisco, "HUB")
 
-        self.assertEqual(_owner_for(cisco), {"owner": "NDP", "ownership_transferred": True})
+        self.assertEqual(_owner_for(cisco), {"owner": "HUB", "ownership_transferred": True})
         self.assertEqual(ObjectMetadata.objects.filter(assigned_object_id=cisco.pk).count(), 1)
 
     def test_empty_owner_is_a_noop(self):
@@ -86,7 +86,7 @@ class StampOwnerTestCase(TestCase):
         cisco = Manufacturer.objects.create(name="Cisco")
 
         with self.assertLogs("nautobot_ssot_mongo.owner_metadata", level="WARNING") as logs:
-            stamp_owner(cisco, "NDP")
+            stamp_owner(cisco, "HUB")
 
         self.assertIn("Could not stamp", logs.output[0])
         self.assertIsNone(_owner_for(cisco))
@@ -97,7 +97,7 @@ class StampOwnerTestCase(TestCase):
         cisco = Manufacturer.objects.create(name="Cisco")
         log = MagicMock()
 
-        stamp_owner(cisco, "NDP", log=log)
+        stamp_owner(cisco, "HUB", log=log)
 
         log.warning.assert_called_once()
         self.assertIn("Could not stamp", log.warning.call_args.args[0])
@@ -115,22 +115,22 @@ class PullStampsAndAdoptsTestCase(TestCase):
     """A MongoDB -> Nautobot sync stamps the publishing instance and adopts matching local objects."""
 
     def test_synced_objects_are_stamped_with_the_publishing_instance(self):
-        source = _mongo_adapter(read_instances=["NDP"])
-        source.client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "from NDP"})
+        source = _mongo_adapter(read_instances=["HUB"])
+        source.client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "from hub"})
         source.load()
 
-        source.sync_to(_nautobot_adapter(nautobot_instances=["NDP"]), diff_class=CustomOrderingDiff)
+        source.sync_to(_nautobot_adapter(nautobot_instances=["HUB"]), diff_class=CustomOrderingDiff)
 
         cisco = Manufacturer.objects.get(name="Cisco")
-        self.assertEqual(cisco.description, "from NDP")
-        self.assertEqual(_owner_for(cisco), {"owner": "NDP", "ownership_transferred": True})
+        self.assertEqual(cisco.description, "from hub")
+        self.assertEqual(_owner_for(cisco), {"owner": "HUB", "ownership_transferred": True})
 
     def test_existing_unstamped_object_is_adopted_instead_of_duplicated(self):
         local = Manufacturer.objects.create(name="Cisco", description="created by hand")
-        source = _mongo_adapter(read_instances=["NDP"])
-        source.client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "from NDP"})
+        source = _mongo_adapter(read_instances=["HUB"])
+        source.client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "from hub"})
         source.load()
-        target = _nautobot_adapter(nautobot_instances=["NDP"])
+        target = _nautobot_adapter(nautobot_instances=["HUB"])
         target.load()
         self.assertEqual(target.get_all("manufacturer"), [])  # unstamped -> not in the diff -> shows as a create
 
@@ -138,35 +138,35 @@ class PullStampsAndAdoptsTestCase(TestCase):
 
         self.assertEqual(Manufacturer.objects.filter(name="Cisco").count(), 1)
         local.refresh_from_db()
-        self.assertEqual(local.description, "from NDP")
-        self.assertEqual(_owner_for(local), {"owner": "NDP", "ownership_transferred": True})
+        self.assertEqual(local.description, "from hub")
+        self.assertEqual(_owner_for(local), {"owner": "HUB", "ownership_transferred": True})
         target.job.logger.info.assert_any_call(
             "Adopted existing %s %s: updated and stamped owner instead of creating", "manufacturer", {"name": "Cisco"}
         )
 
     def test_conflicting_owner_is_overwritten_by_the_publisher(self):
         local = Manufacturer.objects.create(name="Cisco")
-        _stamp(local, "NAP-Austin")
-        source = _mongo_adapter(read_instances=["NDP"])
-        source.client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": ""})
+        _stamp(local, "SPOKE-Austin")
+        source = _mongo_adapter(read_instances=["HUB"])
+        source.client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": ""})
         source.load()
 
-        source.sync_to(_nautobot_adapter(nautobot_instances=["NDP"]), diff_class=CustomOrderingDiff)
+        source.sync_to(_nautobot_adapter(nautobot_instances=["HUB"]), diff_class=CustomOrderingDiff)
 
-        self.assertEqual(_owner_for(local)["owner"], "NDP")
+        self.assertEqual(_owner_for(local)["owner"], "HUB")
 
     def test_update_restamps_the_owner(self):
         local = Manufacturer.objects.create(name="Cisco", description="old")
-        _stamp(local, "NDP")
-        source = _mongo_adapter(read_instances=["NDP"])
-        source.client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "new"})
+        _stamp(local, "HUB")
+        source = _mongo_adapter(read_instances=["HUB"])
+        source.client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco", "description": "new"})
         source.load()
 
-        source.sync_to(_nautobot_adapter(nautobot_instances=["NDP"]), diff_class=CustomOrderingDiff)
+        source.sync_to(_nautobot_adapter(nautobot_instances=["HUB"]), diff_class=CustomOrderingDiff)
 
         local.refresh_from_db()
         self.assertEqual(local.description, "new")
-        self.assertEqual(_owner_for(local), {"owner": "NDP", "ownership_transferred": True})
+        self.assertEqual(_owner_for(local), {"owner": "HUB", "ownership_transferred": True})
 
     def test_push_never_stamps(self):
         Manufacturer.objects.create(name="Cisco")
@@ -177,7 +177,7 @@ class PullStampsAndAdoptsTestCase(TestCase):
         source.sync_to(target, diff_class=CustomOrderingDiff)
 
         self.assertIsNone(_owner_for(Manufacturer.objects.get(name="Cisco")))
-        self.assertIsNotNone(target.client.get("NDP", "dcim.manufacturer", "Cisco"))
+        self.assertIsNotNone(target.client.get("HUB", "dcim.manufacturer", "Cisco"))
 
 
 class OwnerScopedLoadTestCase(TestCase):
@@ -186,11 +186,11 @@ class OwnerScopedLoadTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.cisco = Manufacturer.objects.create(name="Cisco")
-        _stamp(self.cisco, "NDP")
+        _stamp(self.cisco, "HUB")
         self.arista = Manufacturer.objects.create(name="Arista")
-        _stamp(self.arista, "NDP-Other")
+        _stamp(self.arista, "HUB-Other")
         self.juniper = Manufacturer.objects.create(name="Juniper")
-        _stamp(self.juniper, "NDP", transferred=False)
+        _stamp(self.juniper, "HUB", transferred=False)
         Manufacturer.objects.create(name="Local-Vendor")
 
     def _names(self, nautobot_instances):
@@ -202,10 +202,10 @@ class OwnerScopedLoadTestCase(TestCase):
         self.assertEqual(self._names(None), {"Cisco", "Arista", "Juniper", "Local-Vendor"})
 
     def test_selected_owner_loads_only_its_transferred_objects(self):
-        self.assertEqual(self._names(["NDP"]), {"Cisco"})
+        self.assertEqual(self._names(["HUB"]), {"Cisco"})
 
     def test_several_owners(self):
-        self.assertEqual(self._names(["NDP", "NDP-Other"]), {"Cisco", "Arista"})
+        self.assertEqual(self._names(["HUB", "HUB-Other"]), {"Cisco", "Arista"})
 
     def test_empty_selection_loads_nothing(self):
         self.assertEqual(self._names([]), set())
@@ -215,6 +215,6 @@ class OwnerScopedLoadTestCase(TestCase):
             job=MagicMock(debug=False),
             sync=None,
             client=MongoSyncClient(client=mongomock.MongoClient(), database="t", collection="o"),
-            nautobot_instance="NDP",
+            nautobot_instance="HUB",
         )
         self.assertFalse(hasattr(adapter, "nautobot_instances"))

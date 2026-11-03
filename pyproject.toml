@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nautobot-ssot-mongo"
-version = "0.2.0a0"
+version = "0.1.0a0"
 description = "Nautobot Ssot Mongo"
 authors = ["Network to Code, LLC <info@networktocode.com>"]
 readme = "README.md"

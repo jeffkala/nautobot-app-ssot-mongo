@@ -1,8 +1,9 @@
 """Diffsync adapters for nautobot_ssot_mongo.
 
-Every adapter knows all synced models. The NDP and NAP subclasses narrow `top_level` to the objects owned by that
-role, so each sync only moves one owner's objects: the "SSoT NDP adapter" pair moves NDP-owned objects between
-MongoDB and Nautobot, the "SSoT NAP adapter" pair moves NAP-owned objects.
+Every adapter knows all synced models. The hub and spoke subclasses narrow `top_level` to the objects the enabled
+`OwnershipRule`s assign to that role, in their sync order, so each sync only moves one owner's objects: the
+"SSoT hub adapter" pair moves hub-owned objects between MongoDB and Nautobot, the "SSoT spoke adapter" pair moves
+spoke-owned objects.
 """
 
 import logging
@@ -16,7 +17,7 @@ from nautobot.extras.models.metadata import ObjectMetadata
 from nautobot_ssot.contrib import NautobotAdapter
 from pymongo.errors import BulkWriteError, PyMongoError
 
-from nautobot_ssot_mongo.constants import MONGO_BATCH_LIMIT
+from nautobot_ssot_mongo.constants import DEFAULT_OWNERSHIP_RULES, MONGO_BATCH_LIMIT
 from nautobot_ssot_mongo.diffsync.models import (
     CableSSoTModel,
     DeviceSSoTModel,
@@ -55,38 +56,60 @@ from nautobot_ssot_mongo.diffsync.models import (
     VLANSSoTModel,
     VRFSSoTModel,
 )
+from nautobot_ssot_mongo.models import OwnershipRule
 from nautobot_ssot_mongo.owner_metadata import METADATA_TYPE_NAME
-from nautobot_ssot_mongo.roles import ROLE_NAP, ROLE_NDP
+from nautobot_ssot_mongo.roles import ROLE_HUB, ROLE_SPOKE
 from nautobot_ssot_mongo.utils.mongo import get_nautobot_instance
 from nautobot_ssot_mongo.utils.nautobot import check_version_compatibility, get_status_metadata
 
 logger = logging.getLogger(__name__)
 
-# Each list is ordered so that every model is processed after the models it references.
-NDP_MODELS = [
-    "manufacturer",
-    "platform",
-    "locationtype",
-    "devicetype",
-    "tenantgroup",
-    "tenant",
-    "namespace",
-    "vrf",
-    "role",
-    "prefix",
-]
-NAP_MODELS = [
-    "location",
-    "rackgroup",
-    "rack",
-    "device",
-    "interface",
-    "vlan",
-    "ipaddress",
-    "cable",
-]
-MODELS_BY_OWNER = {ROLE_NDP: NDP_MODELS, ROLE_NAP: NAP_MODELS}
-TOP_LEVEL = NDP_MODELS + NAP_MODELS
+LOCAL_MODELS = (
+    ManufacturerSSoTModel,
+    PlatformSSoTModel,
+    LocationTypeSSoTModel,
+    DeviceTypeSSoTModel,
+    TenantGroupSSoTModel,
+    TenantSSoTModel,
+    NamespaceSSoTModel,
+    VRFSSoTModel,
+    RoleSSoTModel,
+    PrefixSSoTModel,
+    LocationSSoTModel,
+    RackGroupSSoTModel,
+    RackSSoTModel,
+    DeviceSSoTModel,
+    InterfaceSSoTModel,
+    VLANSSoTModel,
+    IPAddressSSoTModel,
+    CableSSoTModel,
+)
+# Content type label (`dcim.device`) -> DiffSync model name (`device`), for every model the app can sync.
+MODEL_NAMES_BY_CONTENT_TYPE = {
+    model._model._meta.label_lower: model._modelname  # pylint: disable=protected-access
+    for model in LOCAL_MODELS
+}
+# Every model in the default sync order; the base adapters use it, the owner adapters narrow it per role.
+TOP_LEVEL = [MODEL_NAMES_BY_CONTENT_TYPE[f"{app_label}.{model}"] for app_label, model, _ in DEFAULT_OWNERSHIP_RULES]
+
+
+def owned_model_names(role: str) -> List[str]:
+    """Return the DiffSync model names of the types the enabled ownership rules assign to `role`, in sync order."""
+    labels = (
+        OwnershipRule.objects.filter(owner_role=role, enabled=True)
+        .order_by("sync_order", "content_type__app_label", "content_type__model")
+        .values_list("content_type__app_label", "content_type__model")
+    )
+    names = []
+    for app_label, model in labels:
+        name = MODEL_NAMES_BY_CONTENT_TYPE.get(f"{app_label}.{model}")
+        if name is None:
+            logger.warning(
+                "Ownership rule for %s.%s names a type this app version cannot sync; skipped.", app_label, model
+            )
+            continue
+        names.append(name)
+    return names
 
 
 def sort_related_dicts(items):
@@ -143,6 +166,8 @@ class MongoRemoteAdapter(Adapter):  # pylint: disable=too-many-instance-attribut
     cable = RemoteCableSSoTModel
 
     top_level = TOP_LEVEL
+    # Set on the owner subclasses: the role whose enabled ownership rules select and order `top_level`.
+    owner_role: Optional[str] = None
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
@@ -164,10 +189,12 @@ class MongoRemoteAdapter(Adapter):  # pylint: disable=too-many-instance-attribut
             nautobot_instance (str, optional): Partition this adapter writes to; defaults to the configured
                 `nautobot_instance`.
             read_instances (str | Iterable[str], optional): Partition(s) this adapter loads from; defaults to
-                `nautobot_instance`. The NDP passes every NAP instance here to sync in their objects.
+                `nautobot_instance`. The hub passes every spoke instance here to sync in their objects.
             **kwargs (dict): Arbitrary keyword arguments.
         """
         super().__init__(*args, **kwargs)
+        if self.owner_role:
+            self.top_level = owned_model_names(self.owner_role)
         self.job = job
         self.sync = sync
         self.client = client
@@ -283,16 +310,16 @@ class MongoRemoteAdapter(Adapter):  # pylint: disable=too-many-instance-attribut
         return super().sync_complete(*args, **kwargs)
 
 
-class NDPMongoAdapter(MongoRemoteAdapter):
-    """SSoT NDP adapter, MongoDB side: the objects owned by the NDP."""
+class HubMongoAdapter(MongoRemoteAdapter):
+    """SSoT hub adapter, MongoDB side: the objects owned by the hub."""
 
-    top_level = NDP_MODELS
+    owner_role = ROLE_HUB
 
 
-class NAPMongoAdapter(MongoRemoteAdapter):
-    """SSoT NAP adapter, MongoDB side: the objects owned by each NAP."""
+class SpokeMongoAdapter(MongoRemoteAdapter):
+    """SSoT spoke adapter, MongoDB side: the objects owned by each spoke."""
 
-    top_level = NAP_MODELS
+    owner_role = ROLE_SPOKE
 
 
 class MongoNautobotAdapter(NautobotAdapter):
@@ -323,10 +350,14 @@ class MongoNautobotAdapter(NautobotAdapter):
     cable = CableSSoTModel
 
     top_level = TOP_LEVEL
+    # Set on the owner subclasses: the role whose enabled ownership rules select and order `top_level`.
+    owner_role: Optional[str] = None
 
     def __init__(self, *args, nautobot_instances: Optional[Iterable[str]] = None, **kwargs):
         """Capture the remote `nautobot_instances` the load is scoped to (`None` for an unscoped load)."""
         super().__init__(*args, **kwargs)
+        if self.owner_role:
+            self.top_level = owned_model_names(self.owner_role)
         self.nautobot_instances = None if nautobot_instances is None else list(nautobot_instances)
 
     def _owned_pks(self, model):
@@ -376,17 +407,17 @@ class MongoNautobotAdapter(NautobotAdapter):
         return super()._load_single_object(database_object, diffsync_model, parameter_names)
 
 
-class NDPNautobotAdapter(MongoNautobotAdapter):
-    """SSoT NDP adapter, Nautobot side: the objects owned by the NDP."""
+class HubNautobotAdapter(MongoNautobotAdapter):
+    """SSoT hub adapter, Nautobot side: the objects owned by the hub."""
 
-    top_level = NDP_MODELS
-
-
-class NAPNautobotAdapter(MongoNautobotAdapter):
-    """SSoT NAP adapter, Nautobot side: the objects owned by each NAP."""
-
-    top_level = NAP_MODELS
+    owner_role = ROLE_HUB
 
 
-MONGO_ADAPTERS = {ROLE_NDP: NDPMongoAdapter, ROLE_NAP: NAPMongoAdapter}
-NAUTOBOT_ADAPTERS = {ROLE_NDP: NDPNautobotAdapter, ROLE_NAP: NAPNautobotAdapter}
+class SpokeNautobotAdapter(MongoNautobotAdapter):
+    """SSoT spoke adapter, Nautobot side: the objects owned by each spoke."""
+
+    owner_role = ROLE_SPOKE
+
+
+MONGO_ADAPTERS = {ROLE_HUB: HubMongoAdapter, ROLE_SPOKE: SpokeMongoAdapter}
+NAUTOBOT_ADAPTERS = {ROLE_HUB: HubNautobotAdapter, ROLE_SPOKE: SpokeNautobotAdapter}

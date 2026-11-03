@@ -10,10 +10,10 @@ This document provides an overview of the App including critical information and
 The Nautobot SSoT MongoDB app uses a MongoDB collection as a proxy layer between two kinds of Nautobot instance,
 using the [Nautobot SSoT framework](https://docs.nautobot.com/projects/ssot/en/latest/) and DiffSync:
 
-- The **NDP** (Nautobot Data Platform) is the single federated instance. It owns the global catalog every other
-  instance relies on and syncs in the inventory owned by the NAP instances.
-- A **NAP** (Nautobot Automation Platform) is a local instance. It owns its inventory (locations, racks, devices,
-  interfaces, VLANs, IP addresses and cables) and relies on the NDP's catalog.
+- The **hub** is the single federated instance. It owns the global catalog every other
+  instance relies on and syncs in the inventory owned by the spoke instances.
+- A **spoke** is a local instance. It owns its inventory (locations, racks, devices,
+  interfaces, VLANs, IP addresses and cables) and relies on the hub's catalog.
 
 Every Nautobot object becomes one MongoDB document that carries the name and role of the instance that owns it, the
 Nautobot content type, a `data` payload with the object's identifying and descriptive fields, and the versions of
@@ -21,15 +21,21 @@ Nautobot and this app that wrote it. Every object synced *in* is stamped with th
 naming the instance that published it, which is how a pull tells synced objects apart from objects an instance
 created itself. The app provides two jobs whose behaviour follows the `nautobot_role` setting:
 
-| Job | On the NDP | On a NAP |
+| Job | On the hub | On a spoke |
 | --- | --- | --- |
-| **Nautobot to MongoDB** (`DataTarget`) | Loads the NDP-owned catalog into MongoDB | Loads this NAP's inventory into MongoDB |
-| **MongoDB to Nautobot** (`DataSource`) | Syncs in the inventory of the selected NAPs | Syncs in the NDP-owned catalog |
+| **Nautobot to MongoDB** (`DataTarget`) | Loads the hub-owned catalog into MongoDB | Loads this spoke's inventory into MongoDB |
+| **MongoDB to Nautobot** (`DataSource`) | Syncs in the inventory of the selected spokes | Syncs in the hub-owned catalog |
 
 ### Object ownership
 
-Every object type is owned by exactly one role. The **NDP** owns the catalog, synchronized in this dependency
-order:
+Every object type is owned by exactly one role. The assignment is an **ownership rule** per type, listed under
+**Apps > MongoDB SSoT > Ownership Rules**: the owning role, whether the type is synced at all and its position in
+the sync order. The rules are defined on the hub, published to MongoDB by its **Nautobot to MongoDB** job and
+mirrored by every spoke before each of its sync jobs, so they cannot be edited on a spoke. Handing a type to the other
+role is done with the **Transfer Ownership** job rather than by editing the rule (see
+[Using the App](app_use_cases.md#change-which-role-owns-a-type)).
+
+By default the **hub** owns the catalog, synchronized in this dependency order:
 
 | Nautobot model | `content_type` | Identifiers |
 | --- | --- | --- |
@@ -44,7 +50,7 @@ order:
 | Role | `extras.role` | `name` |
 | Prefix | `ipam.prefix` | `network`, `prefix_length`, `namespace__name` |
 
-Each **NAP** owns its inventory:
+By default each **spoke** owns its inventory:
 
 | Nautobot model | `content_type` | Identifiers |
 | --- | --- | --- |
@@ -57,9 +63,9 @@ Each **NAP** owns its inventory:
 | IP Address | `ipam.ipaddress` | `host`, `parent__namespace__name` |
 | Cable | `dcim.cable` | `src_device`, `src_location`, `src_port`, `dst_device`, `dst_location`, `dst_port` |
 
-NAP-owned objects reference NDP-owned ones by name (`location_type__name`, `device_type__model`, `role__name`,
-`platform__name`, `status__name`, `tenant__name`, `parent__namespace__name`), so a NAP must mirror the NDP's catalog
-before it can publish, and the NDP must hold the catalog before it can mirror a NAP. Devices without a name are not
+Spoke-owned objects reference hub-owned ones by name (`location_type__name`, `device_type__model`, `role__name`,
+`platform__name`, `status__name`, `tenant__name`, `parent__namespace__name`), so a spoke must mirror the hub's catalog
+before it can publish, and the hub must hold the catalog before it can mirror a spoke. Devices without a name are not
 synchronized because they cannot be matched between instances; cables are synchronized only when both ends terminate
 on interfaces.
 
@@ -80,30 +86,30 @@ instance, and the operation is finalized on the SSoT dashboard.
 
 ```mermaid
 sequenceDiagram
-    participant NDP as NDP (Nautobot Data Platform)
-    participant NDPAdapter as SSoT NDP Adapter
+    participant Hub
+    participant HubAdapter as SSoT Hub Adapter
     participant Mongo as MongoDB
-    participant NAPAdapter as SSoT NAP Adapter
-    participant NAP as NAP (Nautobot Automation Platform)
+    participant SpokeAdapter as SSoT Spoke Adapter
+    participant Spoke
 
-    NDP->>Mongo: Load NDP-owned data into MongoDB (Nautobot to MongoDB on the NDP)
-    Mongo-->>NDPAdapter: Sync SSoT models into DiffSync store (MongoDB to Nautobot on a NAP)
-    NDPAdapter->>NAP: Perform CRUD operations to sync data into system
-    Mongo-->>NAP: Finalization of operation
+    Hub->>Mongo: Load hub-owned data into MongoDB (Nautobot to MongoDB on the hub)
+    Mongo-->>HubAdapter: Sync SSoT models into DiffSync store (MongoDB to Nautobot on a spoke)
+    HubAdapter->>Spoke: Perform CRUD operations to sync data into system
+    Mongo-->>Spoke: Finalization of operation
 
-    NAP->>Mongo: Load NAP-owned data into MongoDB (Nautobot to MongoDB on a NAP)
-    Mongo-->>NAPAdapter: Sync SSoT models into DiffSync store (MongoDB to Nautobot on the NDP)
-    NAPAdapter->>NDP: Perform CRUD operations to sync data into system
-    Mongo-->>NDP: Finalization of operation
+    Spoke->>Mongo: Load spoke-owned data into MongoDB (Nautobot to MongoDB on a spoke)
+    Mongo-->>SpokeAdapter: Sync SSoT models into DiffSync store (MongoDB to Nautobot on the hub)
+    SpokeAdapter->>Hub: Perform CRUD operations to sync data into system
+    Mongo-->>Hub: Finalization of operation
 ```
 
-In the code, the "SSoT NDP adapter" is the `NDPMongoAdapter` / `NDPNautobotAdapter` pair and the "SSoT NAP
-adapter" is the `NAPMongoAdapter` / `NAPNautobotAdapter` pair; each pair only knows the models its owner owns.
+In the code, the "SSoT hub adapter" is the `HubMongoAdapter` / `HubNautobotAdapter` pair and the "SSoT spoke
+adapter" is the `SpokeMongoAdapter` / `SpokeNautobotAdapter` pair; each pair only knows the models its owner owns.
 
 ## Audience (User Personas) - Who should use this App?
 
-- Teams operating one central Nautobot (the NDP) that defines reference data for several site- or
-  region-level Nautobot instances (the NAPs), and that want a consolidated inventory of every NAP's locations and
+- Teams operating one central Nautobot (the hub) that defines reference data for several site- or
+  region-level Nautobot instances (the spokes), and that want a consolidated inventory of every spoke's locations and
   devices without direct connectivity between the instances.
 - Network automation engineers who need to publish Nautobot data to a MongoDB-backed application.
 
@@ -119,7 +125,9 @@ adapter" is the `NAPMongoAdapter` / `NAPNautobotAdapter` pair; each pair only kn
 
 ### Extras
 
-- Jobs: `MongoDB to Nautobot` and `Nautobot to MongoDB`.
+- Jobs: `MongoDB to Nautobot`, `Nautobot to MongoDB` and `Transfer Ownership`.
 - Metadata: the data migration creates the **SSoT MongoDB Owner** metadata type (JSON) attached to the eighteen
   synced models. Do not rename it or detach content types from it; the pull jobs rely on it.
-- No custom fields, relationships or database models are added by this app.
+- Model: `OwnershipRule`, one per synced content type, with list, detail and edit views, a REST API endpoint
+  (`/api/plugins/ssot-mongo/ownership-rules/`) and a GraphQL type. The data migration seeds the default rules.
+- No custom fields or relationships are added by this app.

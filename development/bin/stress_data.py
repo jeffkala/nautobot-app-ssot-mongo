@@ -3,14 +3,14 @@
 Run it through `invoke stress-data` on each stack; it reads the sizes from `SSOT_MONGO_STRESS_*` environment variables
 and the role from `PLUGINS_CONFIG`:
 
-- On the NDP it creates the catalog: 2 location types (Stress Region > Stress Site), 10 manufacturers,
+- On the hub it creates the catalog: 2 location types (Stress Region > Stress Site), 10 manufacturers,
   10 platforms, `SSOT_MONGO_STRESS_DEVICE_TYPES` device types, tenants, tenant groups, VRFs, roles and prefixes.
-- On a NAP it creates the inventory on top of the catalog pulled from the NDP: `SSOT_MONGO_STRESS_LOCATIONS` locations
+- On a spoke it creates the inventory on top of the catalog pulled from the hub: `SSOT_MONGO_STRESS_LOCATIONS` locations
   in two levels, rack groups and racks, `SSOT_MONGO_STRESS_DEVICES` devices with `SSOT_MONGO_STRESS_INTERFACES` interfaces
   each, VLANs, one IP address per device and one cable per pair of devices.
 
 Every object is named `Stress ...` or `stress-...`, and `SSOT_MONGO_STRESS_RESET=1` removes them before creating
-anything: the inventory on both roles (the NDP pulled it), the catalog only on the NDP. The task executes the file inside `nautobot-server shell`, so Django is set up
+anything: the inventory on both roles (the hub pulled it), the catalog only on the hub. The task executes the file inside `nautobot-server shell`, so Django is set up
 and the script body runs at module level.
 """
 
@@ -68,8 +68,8 @@ def content_types(*labels):
 def reset():
     """Delete the stress objects this role owns or pulled, children before parents.
 
-    Both roles remove the inventory: a NAP created it and the NDP pulled it. Only the NDP removes the
-    catalog, because on a NAP it is the pulled copy the next inventory run needs.
+    Both roles remove the inventory: a spoke created it and the hub pulled it. Only the hub removes the
+    catalog, because on a spoke it is the pulled copy the next inventory run needs.
     """
     log("removing existing stress objects")
     stress_devices = Device.objects.filter(name__startswith="stress-")
@@ -83,7 +83,7 @@ def reset():
         location.delete()
     for location in Location.objects.filter(name__startswith="Stress Region"):
         location.delete()
-    if ROLE != "NDP":
+    if ROLE != "HUB":
         return
     Prefix.objects.filter(description__startswith="Stress").delete()
     VRF.objects.filter(name__startswith="Stress").delete()
@@ -99,7 +99,7 @@ def reset():
 
 
 def create_catalog():
-    """Create the NDP-owned catalog."""
+    """Create the hub-owned catalog."""
     active = Status.objects.get(name="Active")
     region_type, _ = LocationType.objects.get_or_create(name=REGION_TYPE, defaults={"nestable": False})
     site_type, _ = LocationType.objects.get_or_create(name=SITE_TYPE, defaults={"parent": region_type})
@@ -280,9 +280,11 @@ def create_cables(devices):
 
 
 def create_inventory():
-    """Create the NAP-owned inventory, referencing the catalog pulled from the NDP."""
+    """Create the spoke-owned inventory, referencing the catalog pulled from the hub."""
     if not DeviceType.objects.filter(model__startswith="Stress Model").exists():
-        raise SystemExit("pull the stress catalog from the NDP first (job 'MongoDB to Nautobot')")
+        raise SystemExit("pull the stress catalog from the hub first (job 'MongoDB to Nautobot')")
+    if LOCATIONS <= REGIONS:
+        raise SystemExit(f"SSOT_MONGO_STRESS_LOCATIONS must exceed the {REGIONS} regions; got {LOCATIONS}")
     active = Status.objects.get(name="Active")
     sites = create_locations(active)
     devices = create_devices(active, sites)
@@ -294,7 +296,7 @@ def create_inventory():
 started = time.monotonic()
 if RESET:
     reset()
-if ROLE == "NDP":
+if ROLE == "HUB":
     create_catalog()
 else:
     create_inventory()

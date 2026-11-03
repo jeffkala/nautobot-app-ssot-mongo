@@ -28,9 +28,9 @@ class NautobotSsotMongoConfig(NautobotAppConfig):
         "mongo_password": "",
         "mongo_auth_source": "admin",
         "mongo_timeout_ms": 5000,
-        "nautobot_role": "NDP",
-        "nautobot_instance": "NDP",
-        "ndp_instance": "NDP",
+        "nautobot_role": "HUB",
+        "nautobot_instance": "HUB",
+        "hub_instance": "HUB",
         "tombstone_ttl_days": 30,
     }
     docs_view_name = "plugins:nautobot_ssot_mongo:docs"

@@ -1,1 +1,1 @@
-Added a "Nautobot instances" selector to the "MongoDB to Nautobot" job so the NDP can choose which NAP partitions to sync in.
+Added a "Nautobot instances" selector to the "MongoDB to Nautobot" job so the hub can choose which spoke partitions to sync in.

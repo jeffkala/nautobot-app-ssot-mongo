@@ -1,0 +1,1 @@
+Changed both sync jobs on a spoke to refresh the ownership rules from the hub's partition before loading anything, so the job's data mappings and configuration follow the rules rather than a fixed list.

@@ -1,4 +1,4 @@
-"""DiffSync models for the catalog objects owned by the NDP.
+"""DiffSync models for the catalog objects owned by the hub.
 
 Each synced object type has two DiffSync models that share identifiers and attributes:
 

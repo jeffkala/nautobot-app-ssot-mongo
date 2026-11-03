@@ -1,32 +1,32 @@
 #!/usr/bin/env python
-"""Watchable end-to-end run of the NDP/NAP sync through MongoDB, driven with Playwright.
+"""Watchable end-to-end run of the hub/spoke sync through MongoDB, driven with Playwright.
 
 The script runs in the foreground, opens one visible browser window per Nautobot instance and narrates every step
 on the terminal. It drives the two Docker Compose stacks of the development environment:
 
-- the default stack (`invoke start`) plays a NAP named `NAP-Dev` on http://localhost:8080
-- the second stack (`invoke -f invoke.ndp.yml start`) plays the NDP on http://localhost:8081
+- the default stack (`invoke start`) plays a spoke named `SPOKE-Dev` on http://localhost:8080
+- the second stack (`invoke -f invoke.hub.yml start`) plays the hub on http://localhost:8081
 
 Both share the MongoDB of the default stack. The sequence mirrors the architecture diagram:
 
-1. The NDP owns reference data (created through its REST API if missing) and loads it into MongoDB with
+1. The hub owns reference data (created through its REST API if missing) and loads it into MongoDB with
    "Nautobot to MongoDB".
-2. The NAP runs "MongoDB to Nautobot": the SSoT NDP adapter syncs the NDP-owned models into the DiffSync store and
-   CRUD operations apply them to the NAP.
-3. The NAP owns a location tree, a rack, two devices with interfaces, a VLAN, an IP address and a cable (created
+2. The spoke runs "MongoDB to Nautobot": the SSoT hub adapter syncs the hub-owned models into the DiffSync store and
+   CRUD operations apply them to the spoke.
+3. The spoke owns a location tree, a rack, two devices with interfaces, a VLAN, an IP address and a cable (created
    through its REST API) and loads them into MongoDB with "Nautobot to MongoDB".
-4. The NDP runs "MongoDB to Nautobot" for the NAP's partition: the SSoT NAP adapter syncs the NAP-owned models in,
-   stamps each with the NAP as owner, and the device and cable appear on the NDP.
-5. The NAP deletes the cable and publishes again; the NDP pulls once more. The cable disappears from the NDP through
-   the tombstone the NAP wrote, while a location the NDP created itself is left untouched.
+4. The hub runs "MongoDB to Nautobot" for the spoke's partition: the SSoT spoke adapter syncs the spoke-owned models in,
+   stamps each with the spoke as owner, and the device and cable appear on the hub.
+5. The spoke deletes the cable and publishes again; the hub pulls once more. The cable disappears from the hub through
+   the tombstone the spoke wrote, while a location the hub created itself is left untouched.
 
 Playwright is a development dependency of the project. Run the script from the repository root, on the host:
 
     poetry run playwright install chromium   # once, downloads the browser
-    invoke e2e                               # or: poetry run python development/bin/e2e_ndp_nap.py
+    invoke e2e                               # or: poetry run python development/bin/e2e_hub_spoke.py
 
 Useful options: `--no-start` when both stacks are already up, `--keep-mongo` to leave the collection as it is,
-`--keep-nap-objects` to keep whatever devices and locations the NAP already has, `--slow-mo 500` to slow the
+`--keep-spoke-objects` to keep whatever devices and locations the spoke already has, `--slow-mo 500` to slow the
 browser down, `--no-hold` to close the browsers as soon as the run finishes, and `--fresh` to destroy both stacks
 (including their databases) before starting.
 
@@ -34,9 +34,9 @@ Per-object sync errors are recorded by DiffSync in the SSoT sync log, not in the
 log after every job and fails the run if any object could not be synced.
 
 !!! warning
-    The run changes data on both instances: the shared collection is emptied, the NAP's devices and locations are
-    removed and recreated, "MongoDB to Nautobot" on the NAP replaces the NAP's reference data with what the NDP
-    published, and "MongoDB to Nautobot" on the NDP replaces the NDP's locations and devices with what the NAPs
+    The run changes data on both instances: the shared collection is emptied, the spoke's devices and locations are
+    removed and recreated, "MongoDB to Nautobot" on the spoke replaces the spoke's reference data with what the hub
+    published, and "MongoDB to Nautobot" on the hub replaces the hub's locations and devices with what the spokes
     published. Only point this script at the development stacks.
 """
 
@@ -54,9 +54,9 @@ from playwright.sync_api import Browser, Page, Playwright, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-NAP_URL = "http://localhost:8080"
-NDP_URL = "http://localhost:8081"
-NAP_INSTANCE = "NAP-Dev"
+SPOKE_URL = "http://localhost:8080"
+HUB_URL = "http://localhost:8081"
+SPOKE_INSTANCE = "SPOKE-Dev"
 MONGO_CONTAINER = "nautobot-ssot-mongo-mongo-1"
 SOURCE_JOB = "nautobot_ssot_mongo.jobs.MongoDataSource"  # MongoDB to Nautobot
 TARGET_JOB = "nautobot_ssot_mongo.jobs.MongoDataTarget"  # Nautobot to MongoDB
@@ -220,37 +220,37 @@ class Instance:
 # -- scenario --------------------------------------------------------------------------------------------------
 
 
-def ensure_ndp_reference_data(ndp: Instance):
-    """Create the reference data the NDP owns, if it is not there yet."""
-    log(ndp.name, "Ensuring the NDP owns the reference data the NAP device will reference")
-    cisco = ndp.get_or_create("/dcim/manufacturers/", {"name": "Cisco"}, {"name": "Cisco"})
-    ndp.get_or_create(
+def ensure_hub_reference_data(hub: Instance):
+    """Create the reference data the hub owns, if it is not there yet."""
+    log(hub.name, "Ensuring the hub owns the reference data the spoke device will reference")
+    cisco = hub.get_or_create("/dcim/manufacturers/", {"name": "Cisco"}, {"name": "Cisco"})
+    hub.get_or_create(
         "/dcim/platforms/",
         {"name": "Cisco IOS"},
         {"name": "Cisco IOS", "manufacturer": cisco["id"], "network_driver": "cisco_ios", "napalm_driver": "ios"},
     )
-    ndp.get_or_create(
+    hub.get_or_create(
         "/dcim/device-types/",
         {"model": "C9300-48P"},
         {"manufacturer": cisco["id"], "model": "C9300-48P", "part_number": "C9300-48P", "u_height": 1},
     )
-    region = ndp.get_or_create("/dcim/location-types/", {"name": "Region"}, {"name": "Region", "nestable": True})
-    ndp.get_or_create(
+    region = hub.get_or_create("/dcim/location-types/", {"name": "Region"}, {"name": "Region", "nestable": True})
+    hub.get_or_create(
         "/dcim/location-types/",
         {"name": "Site"},
         {"name": "Site", "parent": region["id"], "content_types": ["dcim.device"]},
     )
-    ndp.get_or_create(
+    hub.get_or_create(
         "/extras/roles/",
         {"name": "Network Device"},
         {"name": "Network Device", "color": "ff9800", "content_types": ["dcim.device"]},
     )
-    ndp.show("/dcim/device-types/")
+    hub.show("/dcim/device-types/")
 
 
-def reset_nap_objects(nap: Instance):
-    """Remove the NAP's inventory so that it publishes exactly the objects of this scenario."""
-    log(nap.name, "Removing the NAP's existing inventory")
+def reset_spoke_objects(spoke: Instance):
+    """Remove the spoke's inventory so that it publishes exactly the objects of this scenario."""
+    log(spoke.name, "Removing the spoke's existing inventory")
     for path in (
         "/dcim/cables/",
         "/dcim/devices/",
@@ -260,28 +260,28 @@ def reset_nap_objects(nap: Instance):
         "/ipam/vlans/",
         "/dcim/locations/",
     ):
-        for obj in nap.api("GET", path, params={"depth": 0, "limit": 1000})["results"]:
-            response = nap.context.request.delete(f"{nap.base_url}/api{path}{obj['id']}/", headers=nap._headers())  # pylint: disable=protected-access
+        for obj in spoke.api("GET", path, params={"depth": 0, "limit": 1000})["results"]:
+            response = spoke.context.request.delete(f"{spoke.base_url}/api{path}{obj['id']}/", headers=spoke._headers())  # pylint: disable=protected-access
             if response.ok:
-                log(nap.name, f"deleted {path}{obj.get('name') or obj.get('display') or obj['id']}")
+                log(spoke.name, f"deleted {path}{obj.get('name') or obj.get('display') or obj['id']}")
             elif response.status != 404:  # already removed by a cascading delete of its parent
                 raise RuntimeError(
-                    f"{nap.name}: DELETE {path}{obj['id']}/ -> {response.status} {response.text()[:300]}"
+                    f"{spoke.name}: DELETE {path}{obj['id']}/ -> {response.status} {response.text()[:300]}"
                 )
 
 
-def create_nap_objects(nap: Instance):  # pylint: disable=too-many-locals
-    """Create the inventory the NAP owns, using the catalog it imported from the NDP."""
-    log(nap.name, "Creating the NAP-owned location tree, rack, devices, interfaces, VLAN, IP address and cable")
-    active = nap.get_one("/extras/statuses/", name="Active")
-    region_type = nap.get_one("/dcim/location-types/", name="Region")
-    site_type = nap.get_one("/dcim/location-types/", name="Site")
-    region = nap.get_or_create(
+def create_spoke_objects(spoke: Instance):  # pylint: disable=too-many-locals
+    """Create the inventory the spoke owns, using the catalog it imported from the hub."""
+    log(spoke.name, "Creating the spoke-owned location tree, rack, devices, interfaces, VLAN, IP address and cable")
+    active = spoke.get_one("/extras/statuses/", name="Active")
+    region_type = spoke.get_one("/dcim/location-types/", name="Region")
+    site_type = spoke.get_one("/dcim/location-types/", name="Site")
+    region = spoke.get_or_create(
         "/dcim/locations/",
         {"name": "US-South"},
         {"name": "US-South", "location_type": region_type["id"], "status": active["id"]},
     )
-    site = nap.get_or_create(
+    site = spoke.get_or_create(
         "/dcim/locations/",
         {"name": "Austin"},
         {
@@ -292,45 +292,45 @@ def create_nap_objects(nap: Instance):  # pylint: disable=too-many-locals
             "facility": "AUS1",
         },
     )
-    group = nap.get_or_create("/dcim/rack-groups/", {"name": "Row A"}, {"name": "Row A", "location": site["id"]})
-    nap.get_or_create(
+    group = spoke.get_or_create("/dcim/rack-groups/", {"name": "Row A"}, {"name": "Row A", "location": site["id"]})
+    spoke.get_or_create(
         "/dcim/racks/",
         {"name": "A1"},
         {"name": "A1", "location": site["id"], "rack_group": group["id"], "status": active["id"], "u_height": 42},
     )
     device_payload = {
         "location": site["id"],
-        "device_type": nap.get_one("/dcim/device-types/", model="C9300-48P")["id"],
-        "role": nap.get_one("/extras/roles/", name="Network Device")["id"],
-        "platform": nap.get_one("/dcim/platforms/", name="Cisco IOS")["id"],
+        "device_type": spoke.get_one("/dcim/device-types/", model="C9300-48P")["id"],
+        "role": spoke.get_one("/extras/roles/", name="Network Device")["id"],
+        "platform": spoke.get_one("/dcim/platforms/", name="Cisco IOS")["id"],
         "status": active["id"],
     }
-    device = nap.get_or_create(
+    device = spoke.get_or_create(
         "/dcim/devices/", {"name": "aus-core-01"}, {"name": "aus-core-01", "serial": "JPE00000001", **device_payload}
     )
-    edge = nap.get_or_create("/dcim/devices/", {"name": "aus-edge-01"}, {"name": "aus-edge-01", **device_payload})
+    edge = spoke.get_or_create("/dcim/devices/", {"name": "aus-edge-01"}, {"name": "aus-edge-01", **device_payload})
     interfaces = {}
     for dev in (device, edge):
-        interfaces[dev["name"]] = nap.get_or_create(
+        interfaces[dev["name"]] = spoke.get_or_create(
             "/dcim/interfaces/",
             {"device": dev["id"], "name": "Ethernet1"},
             {"device": dev["id"], "name": "Ethernet1", "type": "1000base-t", "status": active["id"]},
         )
-    vlan = nap.get_or_create(
+    vlan = spoke.get_or_create(
         "/ipam/vlans/", {"vid": 100, "location": site["id"]}, {"vid": 100, "name": "Users", "status": active["id"]}
     )
-    nap.api("PATCH", f"/ipam/vlans/{vlan['id']}/", payload={"locations": [site["id"]]})
-    nap.get_or_create(
+    spoke.api("PATCH", f"/ipam/vlans/{vlan['id']}/", payload={"locations": [site["id"]]})
+    spoke.get_or_create(
         "/ipam/ip-addresses/",
         {"address": "10.0.0.1/32"},
         {
             "address": "10.0.0.1/32",
-            "namespace": nap.get_one("/ipam/namespaces/", name="Global")["id"],
+            "namespace": spoke.get_one("/ipam/namespaces/", name="Global")["id"],
             "status": active["id"],
             "dns_name": "aus-core-01.example.com",
         },
     )
-    nap.get_or_create(
+    spoke.get_or_create(
         "/dcim/cables/",
         {"termination_a_id": interfaces["aus-core-01"]["id"]},
         {
@@ -338,57 +338,57 @@ def create_nap_objects(nap: Instance):  # pylint: disable=too-many-locals
             "termination_a_id": interfaces["aus-core-01"]["id"],
             "termination_b_type": "dcim.interface",
             "termination_b_id": interfaces["aus-edge-01"]["id"],
-            "status": nap.get_one("/extras/statuses/", name="Connected")["id"],
+            "status": spoke.get_one("/extras/statuses/", name="Connected")["id"],
             "label": "core-edge",
         },
     )
-    nap.show(f"/dcim/devices/{device['id']}/")
+    spoke.show(f"/dcim/devices/{device['id']}/")
 
 
-def verify_ndp_has_the_device(ndp: Instance):
-    """Check through the NDP's API that the NAP's inventory arrived, and show the device in the browser."""
-    device = ndp.get_one("/dcim/devices/", name="aus-core-01")
-    detail = ndp.api("GET", f"/dcim/devices/{device['id']}/", params={"depth": 1})
+def verify_hub_has_the_device(hub: Instance):
+    """Check through the hub's API that the spoke's inventory arrived, and show the device in the browser."""
+    device = hub.get_one("/dcim/devices/", name="aus-core-01")
+    detail = hub.api("GET", f"/dcim/devices/{device['id']}/", params={"depth": 1})
     location = detail["location"]["name"]
-    parent = ndp.api("GET", f"/dcim/locations/{detail['location']['id']}/", params={"depth": 1})["parent"]["name"]
-    log(ndp.name, f"Device aus-core-01 is on the NDP at {parent} / {location}")
-    ndp.show(f"/dcim/devices/{device['id']}/")
+    parent = hub.api("GET", f"/dcim/locations/{detail['location']['id']}/", params={"depth": 1})["parent"]["name"]
+    log(hub.name, f"Device aus-core-01 is on the hub at {parent} / {location}")
+    hub.show(f"/dcim/devices/{device['id']}/")
     if location != "Austin" or parent != "US-South":
-        raise RuntimeError("the device on the NDP is not under US-South / Austin")
-    cables = ndp.api("GET", "/dcim/cables/", params={"label": "core-edge", "depth": 0})["results"]
-    vlans = ndp.api("GET", "/ipam/vlans/", params={"vid": 100, "depth": 0})["results"]
-    owner = ndp.api("GET", "/extras/object-metadata/", params={"assigned_object_id": device["id"], "depth": 0})
+        raise RuntimeError("the device on the hub is not under US-South / Austin")
+    cables = hub.api("GET", "/dcim/cables/", params={"label": "core-edge", "depth": 0})["results"]
+    vlans = hub.api("GET", "/ipam/vlans/", params={"vid": 100, "depth": 0})["results"]
+    owner = hub.api("GET", "/extras/object-metadata/", params={"assigned_object_id": device["id"], "depth": 0})
     log(
-        ndp.name,
+        hub.name,
         f"cables: {len(cables)}, VLAN 100: {len(vlans)}, owner metadata: {[m['value'] for m in owner['results']]}",
     )
     if len(cables) != 1 or len(vlans) != 1:
-        raise RuntimeError("the NAP's cable or VLAN did not arrive on the NDP")
+        raise RuntimeError("the spoke's cable or VLAN did not arrive on the hub")
 
 
-def ensure_ndp_local_location(ndp: Instance):
-    """Create a location on the NDP that no NAP owns; the scoped pull must leave it alone."""
-    active = ndp.get_one("/extras/statuses/", name="Active")
-    region_type = ndp.get_one("/dcim/location-types/", name="Region")
-    return ndp.get_or_create(
+def ensure_hub_local_location(hub: Instance):
+    """Create a location on the hub that no spoke owns; the scoped pull must leave it alone."""
+    active = hub.get_one("/extras/statuses/", name="Active")
+    region_type = hub.get_one("/dcim/location-types/", name="Region")
+    return hub.get_or_create(
         "/dcim/locations/",
-        {"name": "NDP-Only"},
-        {"name": "NDP-Only", "location_type": region_type["id"], "status": active["id"]},
+        {"name": "HUB-Only"},
+        {"name": "HUB-Only", "location_type": region_type["id"], "status": active["id"]},
     )
 
 
-def retire_the_cable(nap: Instance, ndp: Instance):
-    """Delete the cable on the NAP, publish, pull on the NDP and check the tombstone removed it there too."""
-    cable = nap.get_one("/dcim/cables/", label="core-edge")
-    nap.context.request.delete(f"{nap.base_url}/api/dcim/cables/{cable['id']}/", headers=nap._headers())  # pylint: disable=protected-access
-    log(nap.name, "deleted the core-edge cable")
-    nap.run_job(TARGET_JOB)
-    ndp.run_job(SOURCE_JOB, nautobot_instances=[NAP_INSTANCE])
-    if ndp.api("GET", "/dcim/cables/", params={"label": "core-edge", "depth": 0})["results"]:
-        raise RuntimeError("the retired cable is still on the NDP")
-    if not ndp.api("GET", "/dcim/locations/", params={"name": "NDP-Only", "depth": 0})["results"]:
-        raise RuntimeError("the NDP's own location was removed by the pull")
-    log(ndp.name, "the retired cable is gone and the NDP-only location survived")
+def retire_the_cable(spoke: Instance, hub: Instance):
+    """Delete the cable on the spoke, publish, pull on the hub and check the tombstone removed it there too."""
+    cable = spoke.get_one("/dcim/cables/", label="core-edge")
+    spoke.context.request.delete(f"{spoke.base_url}/api/dcim/cables/{cable['id']}/", headers=spoke._headers())  # pylint: disable=protected-access
+    log(spoke.name, "deleted the core-edge cable")
+    spoke.run_job(TARGET_JOB)
+    hub.run_job(SOURCE_JOB, nautobot_instances=[SPOKE_INSTANCE])
+    if hub.api("GET", "/dcim/cables/", params={"label": "core-edge", "depth": 0})["results"]:
+        raise RuntimeError("the retired cable is still on the hub")
+    if not hub.api("GET", "/dcim/locations/", params={"name": "HUB-Only", "depth": 0})["results"]:
+        raise RuntimeError("the hub's own location was removed by the pull")
+    log(hub.name, "the retired cable is gone and the hub-only location survived")
 
 
 def reset_mongo():
@@ -401,17 +401,17 @@ def reset_mongo():
 
 
 def start_stacks(fresh):
-    """Bring up the default (NAP) stack and the NDP stack with invoke, optionally destroying them first."""
+    """Bring up the default (spoke) stack and the hub stack with invoke, optionally destroying them first."""
     if fresh:
         answer = input("--fresh destroys BOTH stacks including their databases. Type 'yes' to continue: ")
         if answer.strip().lower() != "yes":
             sys.exit("aborted")
-        run("invoke -f invoke.ndp.yml destroy")
+        run("invoke -f invoke.hub.yml destroy")
         run("invoke destroy")
-    log("stack", "Starting the default stack (NAP-Dev, http://localhost:8080)")
+    log("stack", "Starting the default stack (SPOKE-Dev, http://localhost:8080)")
     run("invoke start")
-    log("stack", "Starting the NDP stack (NDP, http://localhost:8081)")
-    run("invoke -f invoke.ndp.yml start")
+    log("stack", "Starting the hub stack (hub, http://localhost:8081)")
+    run("invoke -f invoke.hub.yml start")
 
 
 def launch_browser(playwright: Playwright, slow_mo, position):
@@ -424,13 +424,13 @@ def launch_browser(playwright: Playwright, slow_mo, position):
 
 
 def main(argv=None):
-    """Run the whole NDP -> NAP -> NDP loop and return the exit code."""
+    """Run the whole hub -> spoke -> hub loop and return the exit code."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--no-start", action="store_true", help="assume both stacks are already running")
     parser.add_argument("--fresh", action="store_true", help="destroy both stacks (and their data) before starting")
     parser.add_argument("--keep-mongo", action="store_true", help="do not empty the shared MongoDB collection first")
     parser.add_argument(
-        "--keep-nap-objects", action="store_true", help="do not remove the NAP's existing devices and locations"
+        "--keep-spoke-objects", action="store_true", help="do not remove the spoke's existing devices and locations"
     )
     parser.add_argument("--slow-mo", type=int, default=250, help="milliseconds to pause between browser actions")
     parser.add_argument("--no-hold", action="store_true", help="close the browsers as soon as the run finishes")
@@ -441,52 +441,52 @@ def main(argv=None):
     if not args.no_start:
         start_stacks(args.fresh)
     log("stack", "Waiting for both instances to answer")
-    wait_http(f"{NAP_URL}/health/", 600)
-    wait_http(f"{NDP_URL}/health/", 600)
+    wait_http(f"{SPOKE_URL}/health/", 600)
+    wait_http(f"{HUB_URL}/health/", 600)
     if not args.keep_mongo:
         reset_mongo()
 
     with sync_playwright() as playwright:
-        ndp_browser = launch_browser(playwright, args.slow_mo, "0,0")
-        nap_browser = launch_browser(playwright, args.slow_mo, "1320,0")
-        ndp = Instance("NDP", NDP_URL, ndp_browser, args.username, args.password)
-        nap = Instance("NAP-Dev", NAP_URL, nap_browser, args.username, args.password)
+        hub_browser = launch_browser(playwright, args.slow_mo, "0,0")
+        spoke_browser = launch_browser(playwright, args.slow_mo, "1320,0")
+        hub = Instance("HUB", HUB_URL, hub_browser, args.username, args.password)
+        spoke = Instance("SPOKE-Dev", SPOKE_URL, spoke_browser, args.username, args.password)
         try:
-            ndp.login()
-            nap.login()
-            ndp.enable_jobs()
-            nap.enable_jobs()
+            hub.login()
+            spoke.login()
+            hub.enable_jobs()
+            spoke.enable_jobs()
 
-            log("step 1", "NDP loads the catalog it owns into MongoDB")
-            ensure_ndp_reference_data(ndp)
-            ensure_ndp_local_location(ndp)
-            ndp.run_job(TARGET_JOB)
+            log("step 1", "hub loads the catalog it owns into MongoDB")
+            ensure_hub_reference_data(hub)
+            ensure_hub_local_location(hub)
+            hub.run_job(TARGET_JOB)
 
-            log("step 2", "NAP syncs the NDP-owned reference data in from MongoDB")
-            if not args.keep_nap_objects:
-                # Leftover NAP objects may reference tenants or roles the NDP does not own, which would block the
-                # reconciliation of the reference data; clear them first so the NAP mirrors the NDP cleanly.
-                reset_nap_objects(nap)
-            nap.run_job(SOURCE_JOB)
+            log("step 2", "spoke syncs the hub-owned reference data in from MongoDB")
+            if not args.keep_spoke_objects:
+                # Leftover spoke objects may reference tenants or roles the hub does not own, which would block the
+                # reconciliation of the reference data; clear them first so the spoke mirrors the hub cleanly.
+                reset_spoke_objects(spoke)
+            spoke.run_job(SOURCE_JOB)
 
-            log("step 3", "NAP loads the inventory it owns into MongoDB")
-            create_nap_objects(nap)
-            nap.run_job(TARGET_JOB)
+            log("step 3", "spoke loads the inventory it owns into MongoDB")
+            create_spoke_objects(spoke)
+            spoke.run_job(TARGET_JOB)
 
-            log("step 4", "NDP syncs the NAP-owned inventory in from MongoDB")
-            ndp.run_job(SOURCE_JOB, nautobot_instances=[NAP_INSTANCE])
-            verify_ndp_has_the_device(ndp)
+            log("step 4", "hub syncs the spoke-owned inventory in from MongoDB")
+            hub.run_job(SOURCE_JOB, nautobot_instances=[SPOKE_INSTANCE])
+            verify_hub_has_the_device(hub)
 
-            log("step 5", "NAP retires the cable; the tombstone removes it from the NDP")
-            retire_the_cable(nap, ndp)
+            log("step 5", "spoke retires the cable; the tombstone removes it from the hub")
+            retire_the_cable(spoke, hub)
 
-            nap.show("/plugins/ssot/")
-            log("done", "Full NDP -> NAP -> NDP loop completed, including a tombstoned delete")
+            spoke.show("/plugins/ssot/")
+            log("done", "Full hub -> spoke -> hub loop completed, including a tombstoned delete")
             if not args.no_hold:
                 input("Press Enter to close the browsers... ")
         finally:
-            ndp_browser.close()
-            nap_browser.close()
+            hub_browser.close()
+            spoke_browser.close()
     return 0
 
 

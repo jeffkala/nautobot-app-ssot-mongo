@@ -60,20 +60,20 @@ PLUGINS_CONFIG = {
         "mongo_username": os.getenv("NAUTOBOT_SSOT_MONGO_USERNAME", ""),
         "mongo_password": os.getenv("NAUTOBOT_SSOT_MONGO_PASSWORD", ""),
         "mongo_auth_source": os.getenv("NAUTOBOT_SSOT_MONGO_AUTH_SOURCE", "admin"),
-        # "NDP" on the data platform, "NAP" on each automation platform.
-        "nautobot_role": os.getenv("NAUTOBOT_SSOT_MONGO_ROLE", "NDP"),
-        "nautobot_instance": os.getenv("NAUTOBOT_SSOT_MONGO_INSTANCE", "NDP"),
-        "ndp_instance": os.getenv("NAUTOBOT_SSOT_MONGO_NDP_INSTANCE", "NDP"),
+        # "HUB" on the data platform, "SPOKE" on each automation platform.
+        "nautobot_role": os.getenv("NAUTOBOT_SSOT_MONGO_ROLE", "HUB"),
+        "nautobot_instance": os.getenv("NAUTOBOT_SSOT_MONGO_INSTANCE", "HUB"),
+        "hub_instance": os.getenv("NAUTOBOT_SSOT_MONGO_HUB_INSTANCE", "HUB"),
     },
 }
 ```
 
-A typical NAP configuration differs only in the last three settings:
+A typical spoke configuration differs only in the last three settings:
 
 ```python
-        "nautobot_role": "NAP",
-        "nautobot_instance": "NAP-Austin",
-        "ndp_instance": "NDP",
+        "nautobot_role": "SPOKE",
+        "nautobot_instance": "SPOKE-Austin",
+        "hub_instance": "HUB",
 ```
 
 Once the Nautobot configuration is updated, run the Post Upgrade command (`nautobot-server post_upgrade`) to run migrations and clear any cache:
@@ -105,23 +105,23 @@ The app behavior can be controlled with the following list of settings:
 | `mongo_password` | `"secret"` | `""` | Password used with `mongo_username`. Load it from an environment variable or a Nautobot Secret, never from source. |
 | `mongo_auth_source` | `"admin"` | `"admin"` | Authentication database used with `mongo_username`/`mongo_password`. |
 | `mongo_timeout_ms` | `5000` | `5000` | Server selection timeout in milliseconds. |
-| `nautobot_role` | `"NAP"` | `"NDP"` | Role of this instance. The `NDP` (Nautobot Data Platform) is the federated instance: it owns and publishes the global reference data and syncs in every NAP's locations and devices. A `NAP` (Nautobot Automation Platform) owns and publishes its locations and devices and mirrors the NDP's reference data. Any other value stops Nautobot from starting. |
-| `nautobot_instance` | `"NAP-Austin"` | `"NDP"` | Name of this instance, stored in every document it publishes. Must be unique across all instances sharing the collection. On a NAP it must differ from `ndp_instance`. |
-| `ndp_instance` | `"NDP"` | `"NDP"` | `nautobot_instance` of the NDP. A NAP reads the catalog from this partition; the NDP ignores the setting. |
+| `nautobot_role` | `"SPOKE"` | `"HUB"` | Role of this instance. `HUB` is the single federated instance: it owns and publishes the global catalog and syncs in every spoke's inventory. `SPOKE` owns and publishes its inventory (locations, racks, devices, interfaces, VLANs, IP addresses and cables) and mirrors the hub's catalog. Any other value stops Nautobot from starting. |
+| `nautobot_instance` | `"SPOKE-Austin"` | `"HUB"` | Name of this instance, stored in every document it publishes. Must be unique across all instances sharing the collection. On a spoke it must differ from `hub_instance`. |
+| `hub_instance` | `"HUB"` | `"HUB"` | `nautobot_instance` of the hub. A spoke reads the catalog from this partition; the hub ignores the setting. |
 | `tombstone_ttl_days` | `30` | `30` | Days a soft-deleted (tombstone) document is kept before MongoDB expires it through a TTL index. `0` keeps tombstones forever. |
 
 ### Document Layout
 
 Every synced object is stored as its own document, tagged with the `nautobot_instance` and `nautobot_role` that own
 it. The unique index `instance_content_type_key_unique` on `(nautobot_instance, content_type, key)` and the
-`tombstone_ttl` TTL index are created automatically the first time a job runs. The NDP reads NAP-owned objects from
-the partitions selected in the job (every partition published by a NAP when none is selected), so a new NAP only has
-to publish once to appear on the NDP; no NDP configuration change is needed.
+`tombstone_ttl` TTL index are created automatically the first time a job runs. The hub reads spoke-owned objects from
+the partitions selected in the job (every partition published by a spoke when none is selected), so a new spoke only has
+to publish once to appear on the hub; no hub configuration change is needed.
 
 ```json
 {
-    "nautobot_instance": "NDP",
-    "nautobot_role": "NDP",
+    "nautobot_instance": "HUB",
+    "nautobot_role": "HUB",
     "content_type": "dcim.devicetype",
     "key": "C9300-48P__Cisco",
     "data": {
@@ -149,21 +149,21 @@ to publish once to appear on the NDP; no NDP configuration change is needed.
 
 ## Running at Scale
 
-A sync job loads every object of the models that it syncs into memory on both sides. It then computes the diff and applies it. The push job writes to MongoDB in batches of 100 operations per content type, so a full push of a NAP with 3,000 devices and 24,000 interfaces is a few hundred round trips, not one per object.
+A sync job loads every object of the models that it syncs into memory on both sides. It then computes the diff and applies it. The push job writes to MongoDB in batches of 100 operations per content type, so a full push of a spoke with 3,000 devices and 24,000 interfaces is a few hundred round trips, not one per object.
 
-The pull job still writes one object at a time into Nautobot, through full model validation. Each object also gets an `SSoT MongoDB Owner` metadata row and an SSoT sync log entry. The database therefore bounds a pull. A first pull of a NAP with 3,000 devices, 24,000 interfaces and 32,000 objects in all takes minutes, not seconds. A re-pull with nothing changed is bounded by reading MongoDB and the local objects.
+The pull job still writes one object at a time into Nautobot, through full model validation. Each object also gets an `SSoT MongoDB Owner` metadata row and an SSoT sync log entry. The database therefore bounds a pull. A first pull of a spoke with 3,000 devices, 24,000 interfaces and 32,000 objects in all takes minutes, not seconds. A re-pull with nothing changed is bounded by reading MongoDB and the local objects.
 
-A sync job is single-threaded. To pull several NAPs faster, schedule one pull job per NAP instead of a selection of every NAP in one job. The owner scoping keeps the jobs from touching each other's objects, and Celery runs them on separate workers in parallel.
+A sync job is single-threaded. To pull several spokes faster, schedule one pull job per spoke instead of a selection of every spoke in one job. The owner scoping keeps the jobs from touching each other's objects, and Celery runs them on separate workers in parallel.
 
 Nautobot's change log is the largest share of the per-object cost. Every save serializes the object twice for its `ObjectChange` entry. When the job ends, Nautobot walks every entry that the job wrote to drive webhooks, job hooks and events. The pull job has a **Record change log** option, on by default, for exactly that case. Turn it off for the first pull of a large inventory, where the change log only repeats what the SSoT sync log already records. Objects written without a change log get their first entry on their next change, and the pre-change snapshot is captured then. While the option is off, no webhooks or job hooks fire for the objects that a sync writes. Therefore, leave the option on for steady-state syncs that other systems watch.
 
 | Setting | Where | Guidance |
 | ------- | ----- | -------- |
-| Job time limits | Each job's edit view, **Soft time limit** and **Time limit** overrides | The two jobs default to a 60 minute soft limit and a 65 minute hard limit, instead of Nautobot's 5 and 10 minutes. Raise the overrides when a full pull of a large NAP needs more time. The job is killed at the hard limit. A re-run starts from the current state, so only time is lost. |
+| Job time limits | Each job's edit view, **Soft time limit** and **Time limit** overrides | The two jobs default to a 60 minute soft limit and a 65 minute hard limit, instead of Nautobot's 5 and 10 minutes. Raise the overrides when a full pull of a large spoke needs more time. The job is killed at the hard limit. A re-run starts from the current state, so only time is lost. |
 | Batched writes | Push job | Writes go to MongoDB 100 at a time. A write the server rejects fails the job; the writes before it in that batch are kept, and a re-run resumes from the current state because the diff is computed again. |
 | `tombstone_ttl_days` | `PLUGINS_CONFIG` | Deleted objects stay in MongoDB as tombstones until the TTL index expires them. For an inventory with churn, keep a TTL so that old tombstones do not accumulate. |
 | Worker memory | Celery worker | Budget roughly 1 GiB of worker memory per 100,000 synced objects, on top of Nautobot's baseline. |
 | Change log | Pull job's **Record change log** checkbox | On by default. Turn it off for the first pull of a large inventory. This skips one `ObjectChange` per written object and the post-sync processing of those entries. See above for what is lost. |
 | Log volume | Job **debug** checkbox | Unchanged objects are written to the sync log only when debug is on. Leave debug off for large syncs. The job log still records one line per written batch. |
 
-One limit comes from the data model, not from the settings. Locations are identified by name alone. Therefore, every NAP that feeds one NDP must use location names that are unique across all of these NAPs.
+One limit comes from the data model, not from the settings. Locations are identified by name alone. Therefore, every spoke that feeds one hub must use location names that are unique across all of these spokes.

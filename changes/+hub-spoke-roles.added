@@ -1,0 +1,1 @@
+Added the `nautobot_role` setting (`HUB` or `SPOKE`) and the `hub_instance` setting, so that the hub publishes the global catalog and syncs in every spoke's inventory while a spoke publishes its own inventory and mirrors the hub's catalog.

@@ -13,7 +13,7 @@ from pymongo.errors import PyMongoError
 
 from nautobot_ssot_mongo.constants import JOB_SOFT_TIME_LIMIT, JOB_TIME_LIMIT
 from nautobot_ssot_mongo.diff import CustomOrderingDiff
-from nautobot_ssot_mongo.diffsync.adapters import NAP_MODELS, NDP_MODELS
+from nautobot_ssot_mongo.diffsync.adapters import owned_model_names
 from nautobot_ssot_mongo.jobs import (
     REMOTE_INSTANCES_CACHE_KEY,
     MongoDataSource,
@@ -34,17 +34,17 @@ class RoleDrivenJobTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.client = MongoSyncClient(client=mongomock.MongoClient(), database="testdb", collection="objects")
-        self.client.upsert("NDP", "dcim.manufacturer", "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "NDP"})
+        self.client.upsert("HUB", "dcim.manufacturer", "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "HUB"})
         self.client.upsert(
-            "NAP-Austin",
+            "SPOKE-Austin",
             "dcim.location",
             "Austin__None",
             {"name": "Austin", "parent__name": None, "location_type__name": "Site"},
-            metadata={"nautobot_role": "NAP"},
+            metadata={"nautobot_role": "SPOKE"},
         )
-        # A partition written by an older app version carries no role and must still count as a NAP.
+        # A partition written by an older app version carries no role and must still count as a spoke.
         self.client.upsert(
-            "NAP-Boston",
+            "SPOKE-Boston",
             "dcim.location",
             "Boston__None",
             {"name": "Boston", "parent__name": None, "location_type__name": "Site"},
@@ -61,108 +61,110 @@ class RoleDrivenJobTestCase(TestCase):
         job.sync = None
         return job
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Dev"))
-    def test_nap_source_job_reads_ndp_owned_objects_from_the_ndp_partition(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Dev"))
+    def test_spoke_source_job_reads_hub_owned_objects_from_the_hub_partition(self):
         job = self._job(MongoDataSource)
 
         job.load_source_adapter()
 
-        self.assertEqual(job.source_adapter.top_level, NDP_MODELS)
-        self.assertEqual(job.source_adapter.read_instances, ["NDP"])
+        self.assertEqual(job.source_adapter.top_level, owned_model_names("HUB"))
+        self.assertEqual(job.source_adapter.read_instances, ["HUB"])
         self.assertEqual([m.name for m in job.source_adapter.get_all("manufacturer")], ["Cisco"])
-        self.assertEqual(MongoDataSource.owner_role(), "NDP")
-        self.assertEqual(MongoDataSource.config_information()["NDP instance"], "NDP")
-        self.assertEqual(MongoDataSource.config_information()["Objects owned by"], "NDP")
+        self.assertEqual(MongoDataSource.owner_role(), "HUB")
+        self.assertEqual(MongoDataSource.config_information()["Hub instance"], "HUB")
+        self.assertEqual(MongoDataSource.config_information()["Objects owned by"], "HUB")
         self.assertEqual(MongoDataSource.config_information()["Tombstone TTL (days)"], 30)
         self.assertEqual(MongoDataSource.config_information()["Owner metadata type"], "SSoT MongoDB Owner")
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Dev"))
-    def test_nap_source_job_scopes_its_target_to_the_ndp_partition(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Dev"))
+    def test_spoke_source_job_scopes_its_target_to_the_hub_partition(self):
         job = self._job(MongoDataSource)
 
         job.load_source_adapter()
         job.load_target_adapter()
 
-        self.assertEqual(job.target_adapter.nautobot_instances, ["NDP"])
+        self.assertEqual(job.target_adapter.nautobot_instances, ["HUB"])
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
-    def test_ndp_source_job_reads_nap_owned_objects_from_every_other_partition(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
+    def test_hub_source_job_reads_spoke_owned_objects_from_every_other_partition(self):
         job = self._job(MongoDataSource)
 
         job.load_source_adapter()
 
-        self.assertEqual(job.source_adapter.top_level, NAP_MODELS)
-        self.assertEqual(job.source_adapter.read_instances, ["NAP-Austin", "NAP-Boston"])
+        self.assertEqual(job.source_adapter.top_level, owned_model_names("SPOKE"))
+        self.assertEqual(job.source_adapter.read_instances, ["SPOKE-Austin", "SPOKE-Boston"])
         self.assertEqual({m.name for m in job.source_adapter.get_all("location")}, {"Austin", "Boston"})
-        self.assertNotIn("NDP instance", MongoDataSource.config_information())
-        self.assertEqual(MongoDataSource.config_information()["NAP instances found"], "NAP-Austin, NAP-Boston")
+        self.assertNotIn("Hub instance", MongoDataSource.config_information())
+        self.assertEqual(MongoDataSource.config_information()["Spoke instances found"], "SPOKE-Austin, SPOKE-Boston")
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
-    def test_ndp_source_job_reads_only_the_selected_partitions(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
+    def test_hub_source_job_reads_only_the_selected_partitions(self):
         job = self._job(MongoDataSource)
-        job.nautobot_instances = ["NAP-Boston"]
+        job.nautobot_instances = ["SPOKE-Boston"]
 
         job.load_source_adapter()
         job.load_target_adapter()
 
-        self.assertEqual(job.source_adapter.read_instances, ["NAP-Boston"])
+        self.assertEqual(job.source_adapter.read_instances, ["SPOKE-Boston"])
         self.assertEqual([m.name for m in job.source_adapter.get_all("location")], ["Boston"])
-        self.assertEqual(job.target_adapter.nautobot_instances, ["NAP-Boston"])
+        self.assertEqual(job.target_adapter.nautobot_instances, ["SPOKE-Boston"])
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
     def test_remote_instance_choices_are_the_other_roles_partitions(self):
-        self.assertEqual(get_remote_instance_choices(), [("NAP-Austin", "NAP-Austin"), ("NAP-Boston", "NAP-Boston")])
+        self.assertEqual(
+            get_remote_instance_choices(), [("SPOKE-Austin", "SPOKE-Austin"), ("SPOKE-Boston", "SPOKE-Boston")]
+        )
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Austin"))
-    def test_remote_instance_choices_on_a_nap_list_the_ndp(self):
-        self.assertEqual(get_remote_instance_choices(), [("NAP-Boston", "NAP-Boston"), ("NDP", "NDP")])
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Austin"))
+    def test_remote_instance_choices_on_a_spoke_list_the_hub(self):
+        self.assertEqual(get_remote_instance_choices(), [("HUB", "HUB"), ("SPOKE-Boston", "SPOKE-Boston")])
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
     def test_remote_instance_choices_are_served_from_the_cache_for_a_while(self):
         first = get_remote_instance_choices()
-        self.client.upsert("NAP-Dallas", "dcim.location", "Dallas__None", {"name": "Dallas"})
+        self.client.upsert("SPOKE-Dallas", "dcim.location", "Dallas__None", {"name": "Dallas"})
 
         self.assertEqual(get_remote_instance_choices(), first)
         cache.delete(REMOTE_INSTANCES_CACHE_KEY)
-        self.assertIn(("NAP-Dallas", "NAP-Dallas"), get_remote_instance_choices())
+        self.assertIn(("SPOKE-Dallas", "SPOKE-Dallas"), get_remote_instance_choices())
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
     def test_unreachable_mongodb_yields_no_choices_and_caches_nothing(self):
         with patch.object(MongoSyncClient, "instances", side_effect=PyMongoError("down")):
             self.assertEqual(get_remote_instance_choices(), [])
         self.assertIsNone(cache.get(REMOTE_INSTANCES_CACHE_KEY))
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NDP", nautobot_instance="NDP"))
-    def test_ndp_target_job_loads_ndp_owned_objects_under_its_own_partition(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="HUB", nautobot_instance="HUB"))
+    def test_hub_target_job_loads_hub_owned_objects_under_its_own_partition(self):
         job = self._job(MongoDataTarget)
 
         job.load_target_adapter()
 
-        self.assertEqual(job.target_adapter.top_level, NDP_MODELS)
-        self.assertEqual(job.target_adapter.nautobot_instance, "NDP")
-        self.assertEqual(job.target_adapter.read_instances, "NDP")
-        self.assertEqual(job.get_nautobot_adapter().top_level, NDP_MODELS)
+        self.assertEqual(job.target_adapter.top_level, owned_model_names("HUB"))
+        self.assertEqual(job.target_adapter.nautobot_instance, "HUB")
+        self.assertEqual(job.target_adapter.read_instances, "HUB")
+        self.assertEqual(job.get_nautobot_adapter().top_level, owned_model_names("HUB"))
         self.assertIsNone(job.get_nautobot_adapter().nautobot_instances)
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Boston"))
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Boston"))
     def test_target_job_backfills_role_and_version_on_legacy_documents(self):
         job = self._job(MongoDataTarget)
 
         job.load_target_adapter()
 
-        boston = self.client.get("NAP-Boston", "dcim.location", "Boston__None")
-        self.assertEqual(boston["nautobot_role"], "NAP")
+        boston = self.client.get("SPOKE-Boston", "dcim.location", "Boston__None")
+        self.assertEqual(boston["nautobot_role"], "SPOKE")
         self.assertIn("nautobot_version", boston)
 
-    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="NAP", nautobot_instance="NAP-Dev"))
-    def test_nap_target_job_loads_nap_owned_objects_under_its_own_partition(self):
+    @override_settings(PLUGINS_CONFIG=role_settings(nautobot_role="SPOKE", nautobot_instance="SPOKE-Dev"))
+    def test_spoke_target_job_loads_spoke_owned_objects_under_its_own_partition(self):
         job = self._job(MongoDataTarget)
 
         job.load_target_adapter()
 
-        self.assertEqual(job.target_adapter.top_level, NAP_MODELS)
-        self.assertEqual(job.target_adapter.nautobot_instance, "NAP-Dev")
-        self.assertEqual(job.get_nautobot_adapter().top_level, NAP_MODELS)
+        self.assertEqual(job.target_adapter.top_level, owned_model_names("SPOKE"))
+        self.assertEqual(job.target_adapter.nautobot_instance, "SPOKE-Dev")
+        self.assertEqual(job.get_nautobot_adapter().top_level, owned_model_names("SPOKE"))
         self.assertEqual(
             [mapping.target_name for mapping in MongoDataTarget.data_mappings()],
             ["Location", "Rack Group", "Rack", "Device", "Interface", "VLAN", "IP Address", "Cable"],

@@ -1,1 +1,1 @@
-Added rack groups, racks, interfaces, VLANs and cables to the inventory a NAP publishes and the NDP syncs in.
+Added rack groups, racks, interfaces, VLANs and cables to the inventory a spoke publishes and the hub syncs in.

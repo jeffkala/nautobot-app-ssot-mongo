@@ -1,17 +1,17 @@
 ---
-# Runtime configuration for the second, NDP-role stack. Use it on top of your invoke.yml:
+# Runtime configuration for the second, hub-role stack. Use it on top of your invoke.yml:
 #
-#     invoke -f invoke.ndp.yml start
-#     invoke -f invoke.ndp.yml logs --follow
-#     invoke -f invoke.ndp.yml destroy
+#     invoke -f invoke.hub.yml start
+#     invoke -f invoke.hub.yml logs --follow
+#     invoke -f invoke.hub.yml destroy
 #
 # The default stack (plain `invoke start`) must be running first, because this stack joins its network to reach the
 # shared MongoDB service. See docs/dev/dev_environment.md.
 nautobot_ssot_mongo:
-  project_name: "nautobot-ssot-mongo-ndp"
+  project_name: "nautobot-ssot-mongo-hub"
   compose_files:
     - "docker-compose.base.yml"
     - "docker-compose.redis.yml"
     - "docker-compose.postgres.yml"
     - "docker-compose.dev.yml"
-    - "docker-compose.ndp.yml"
+    - "docker-compose.hub.yml"

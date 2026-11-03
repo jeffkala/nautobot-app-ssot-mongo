@@ -337,3 +337,6 @@ GEMINI.md
 .ollama/
 # https://github.com/kirodotdev/Kiro
 .kiro/
+
+# Video walkthroughs recorded by `invoke record-walkthrough`
+development/recordings/

@@ -43,36 +43,39 @@ class MongoSyncClientTestCase(TestCase):
         self.assertEqual(self.client.find_data(INSTANCE, "dcim.devicetype"), [])
 
     def test_find_data_can_span_several_instances(self):
-        self.client.upsert("NAP-Boston", CONTENT_TYPE, "Juniper", {"name": "Juniper"})
-        self.client.upsert("NAP-Austin", CONTENT_TYPE, "Cisco", {"name": "Cisco"})
+        self.client.upsert("SPOKE-Boston", CONTENT_TYPE, "Juniper", {"name": "Juniper"})
+        self.client.upsert("SPOKE-Austin", CONTENT_TYPE, "Cisco", {"name": "Cisco"})
         self.client.upsert(INSTANCE, CONTENT_TYPE, "Arista", {"name": "Arista"})
 
         self.assertEqual(
-            self.client.find_data(["NAP-Austin", "NAP-Boston"], CONTENT_TYPE), [{"name": "Cisco"}, {"name": "Juniper"}]
+            self.client.find_data(["SPOKE-Austin", "SPOKE-Boston"], CONTENT_TYPE),
+            [{"name": "Cisco"}, {"name": "Juniper"}],
         )
         self.assertEqual(self.client.find_data([], CONTENT_TYPE), [])
 
     def test_instances_lists_distinct_partitions(self):
-        self.client.upsert("NAP-Boston", CONTENT_TYPE, "Juniper", {"name": "Juniper"})
+        self.client.upsert("SPOKE-Boston", CONTENT_TYPE, "Juniper", {"name": "Juniper"})
         self.client.upsert(INSTANCE, CONTENT_TYPE, "Cisco", {"name": "Cisco"})
         self.client.upsert(INSTANCE, "dcim.platform", "IOS", {"name": "IOS"})
 
-        self.assertEqual(self.client.instances(), ["NAP-Boston", INSTANCE])
+        self.assertEqual(self.client.instances(), [INSTANCE, "SPOKE-Boston"])
 
     def test_instances_can_exclude_a_role_and_an_instance(self):
-        self.client.upsert("NDP", CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "NDP"})
-        self.client.upsert("NAP-Austin", "dcim.device", "d1__Austin", {"name": "d1"}, metadata={"nautobot_role": "NAP"})
+        self.client.upsert("HUB", CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "HUB"})
+        self.client.upsert(
+            "SPOKE-Austin", "dcim.device", "d1__Austin", {"name": "d1"}, metadata={"nautobot_role": "SPOKE"}
+        )
         # A legacy document without a role is never excluded by the role filter.
         self.client.collection.insert_one(
-            {"nautobot_instance": "NAP-Legacy", "content_type": "dcim.device", "key": "d2__X", "data": {"name": "d2"}}
+            {"nautobot_instance": "SPOKE-Legacy", "content_type": "dcim.device", "key": "d2__X", "data": {"name": "d2"}}
         )
 
-        self.assertEqual(self.client.instances(exclude_role="NDP"), ["NAP-Austin", "NAP-Legacy"])
-        self.assertEqual(self.client.instances(exclude_role="NAP"), ["NAP-Legacy", "NDP"])
-        self.assertEqual(self.client.instances(exclude_instance="NDP"), ["NAP-Austin", "NAP-Legacy"])
+        self.assertEqual(self.client.instances(exclude_role="HUB"), ["SPOKE-Austin", "SPOKE-Legacy"])
+        self.assertEqual(self.client.instances(exclude_role="SPOKE"), ["HUB", "SPOKE-Legacy"])
+        self.assertEqual(self.client.instances(exclude_instance="HUB"), ["SPOKE-Austin", "SPOKE-Legacy"])
 
     def test_delete_turns_the_document_into_a_hidden_tombstone(self):
-        self.client.upsert(INSTANCE, CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "NDP"})
+        self.client.upsert(INSTANCE, CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "HUB"})
         self.client.upsert(INSTANCE, CONTENT_TYPE, "Arista", {"name": "Arista"})
 
         self.assertEqual(self.client.delete(INSTANCE, CONTENT_TYPE, "Cisco"), 1)
@@ -105,12 +108,12 @@ class MongoSyncClientTestCase(TestCase):
             CONTENT_TYPE,
             "Cisco",
             {"name": "Cisco"},
-            metadata={"nautobot_role": "NDP", "nautobot_version": "3.2.7"},
+            metadata={"nautobot_role": "HUB", "nautobot_version": "3.2.7"},
         )
 
         self.assertEqual(self.client.find_data(INSTANCE, CONTENT_TYPE), [{"name": "Cisco"}, {"name": "Legacy"}])
         stored = self.client.get(INSTANCE, CONTENT_TYPE, "Cisco")
-        self.assertEqual(stored["nautobot_role"], "NDP")
+        self.assertEqual(stored["nautobot_role"], "HUB")
         self.assertEqual(stored["nautobot_version"], "3.2.7")
 
     def test_purge_removes_tombstones_too(self):
@@ -124,15 +127,15 @@ class MongoSyncClientTestCase(TestCase):
         self.client.collection.insert_one(
             {"nautobot_instance": INSTANCE, "content_type": CONTENT_TYPE, "key": "Legacy", "data": {"name": "Legacy"}}
         )
-        self.client.upsert(INSTANCE, CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "NAP"})
+        self.client.upsert(INSTANCE, CONTENT_TYPE, "Cisco", {"name": "Cisco"}, metadata={"nautobot_role": "SPOKE"})
         self.client.collection.insert_one(
             {"nautobot_instance": "Other", "content_type": CONTENT_TYPE, "key": "X", "data": {"name": "X"}}
         )
 
-        self.assertEqual(self.client.backfill_metadata(INSTANCE, {"nautobot_role": "NDP"}), 1)
-        self.assertEqual(self.client.get(INSTANCE, CONTENT_TYPE, "Legacy")["nautobot_role"], "NDP")
+        self.assertEqual(self.client.backfill_metadata(INSTANCE, {"nautobot_role": "HUB"}), 1)
+        self.assertEqual(self.client.get(INSTANCE, CONTENT_TYPE, "Legacy")["nautobot_role"], "HUB")
         self.assertFalse(self.client.get(INSTANCE, CONTENT_TYPE, "Legacy")["deleted"])
-        self.assertEqual(self.client.get(INSTANCE, CONTENT_TYPE, "Cisco")["nautobot_role"], "NAP")
+        self.assertEqual(self.client.get(INSTANCE, CONTENT_TYPE, "Cisco")["nautobot_role"], "SPOKE")
         self.assertNotIn("nautobot_role", self.client.get("Other", CONTENT_TYPE, "X"))
 
     def test_ensure_indexes_manages_the_tombstone_ttl_index(self):
